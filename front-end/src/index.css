@@ -1,0 +1,24 @@
+/* src/index.css */
+:root {
+  /* Paleta Verde e Branco */
+  --primary: #10b981;        /* Verde Esmeralda principal */
+  --primary-dark: #059669;   /* Verde mais escuro para hover */
+  --bg-body: #f0fdf4;        /* Branco levemente esverdeado para o fundo */
+  --bg-sidebar: #064e3b;     /* Verde floresta bem escuro para contraste */
+  --text-main: #064e3b;      /* Texto em verde escuro para melhor leitura */
+  --text-muted: #6b7280;     /* Cinza para textos secundários */
+  --white: #ffffff;
+  --border: #dcfce7;         /* Bordas em verde muito claro */
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: 'Inter', -apple-system, sans-serif;
+}
+
+body {
+  background-color: var(--bg-body);
+  color: var(--text-main);
+}
