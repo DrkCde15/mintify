@@ -1,22 +1,59 @@
 # 🌿 Mintify - Marketplace de Infoprodutos
 
-O **Mintify** é uma plataforma full-stack moderna para venda e gestão de produtos digitais, inspirada na Kiwify. Com uma interface limpa em tons de verde esmeralda, a plataforma permite que produtores gerenciem seus conteúdos, acompanhem vendas e administrem alunos de forma intuitiva.
+O **Mintify** é uma plataforma full-stack moderna para venda e gestão de produtos digitais. A plataforma oferece uma experiência completa desde o cadastro de usuários até a gestão avançada de vendas e de alunos.
 
 ## 🚀 Tecnologias
 
 ### Frontend
 
 * **React.js (Vite)**: Performance e agilidade no desenvolvimento.
-* **React Router DOM**: Navegação Single Page Application (SPA).
-* **Lucide React**: Biblioteca de ícones modernos.
-* **CSS3 Variables**: Design system baseado em variáveis para fácil manutenção.
+* **Axios**: Cliente HTTP configurado com **Interceptors** para anexar automaticamente o Token JWT.
+* **Contexto de Autenticação**: Proteção de rotas privadas e persistência de sessão via `localStorage`.
 
 ### Backend
 
-* **FastAPI (Python)**: Framework de alto desempenho para APIs.
-* **SQLAlchemy**: ORM para comunicação com o banco de dados.
-* **MySQL**: Banco de dados relacional para persistência de dados.
-* **Pydantic**: Validação de dados e tipos.
+* **FastAPI (Python)**: Framework de alto desempenho para APIs assíncronas.
+* **JWT (JSON Web Token)**: Sistema de segurança para autenticação e autorização de usuários.
+* **SQLAlchemy & MySQL**: ORM robusto para persistência de dados relacionais.
+
+---
+
+## 🛠️ Configuração Inicial
+
+### 1. Variáveis de Ambiente (.env)
+
+Para segurança e flexibilidade, o projeto utiliza variáveis de ambiente. Crie um arquivo `.env` na raiz da pasta `/back-end`:
+
+```env
+# Banco de Dados
+DATABASE_URL=mysql+pymysql://usuario:senha@localhost:3306/mintify_db
+
+# Segurança (JWT)
+SECRET_KEY=sua_chave_secreta_aqui_muito_longa
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=1440
+
+```
+
+### 2. Configurando o Backend
+
+```bash
+cd back-end
+python -m venv venv
+# Ativar venv: Windows (venv\Scripts\activate) | Linux (source venv/bin/activate)
+pip install -r requirements.txt
+uvicorn main:app --reload
+
+```
+
+### 3. Configurando o Frontend
+
+```bash
+cd front-end
+npm install
+npm run dev
+
+```
 
 ---
 
@@ -24,71 +61,15 @@ O **Mintify** é uma plataforma full-stack moderna para venda e gestão de produ
 
 O projeto é dividido em dois diretórios principais:
 
-* `/front-end`: Interface visual (React).
-* `/back-end`: API e Banco de Dados (FastAPI).
-
----
-
-## 🛠️ Como Rodar o Projeto
-
-### 1. Pré-requisitos
-
-* **Node.js** instalado.
-* **Python 3.9+** instalado.
-* **MySQL Server** rodando localmente (Crie um banco de dados chamado `mintify_db`).
-
-### 2. Configurando o Backend (Servidor)
-
-Abra um terminal na pasta raiz do projeto e execute:
-
-```bash
-# Entrar na pasta do backend
-cd backend
-
-# Criar ambiente virtual
-python -m venv venv
-
-# Ativar ambiente virtual
-# No Windows:
-venv\Scripts\activate
-# No Linux/Mac:
-source venv/bin/activate
-
-# Instalar as dependências
-pip install fastapi uvicorn sqlalchemy pymysql pydantic
-
-# Iniciar o servidor
-uvicorn main:app --reload
-
-```
-
-> O backend estará disponível em: `http://localhost:8000`
-
-### 3. Configurando o Frontend (Interface)
-
-Abra um **segundo terminal** na pasta raiz do projeto:
-
-```bash
-# Entrar na pasta do frontend
-cd frontend
-
-# Instalar as dependências do Node
-npm install
-
-# Iniciar o ambiente de desenvolvimento
-npm run dev
-
-```
-
-> O frontend estará disponível em: `http://localhost:5173`
+* `/front-end`: Interface visual (React + Vite).
+* `/back-end`: API (FastAPI), Segurança e Banco de Dados.
 
 ---
 
 ## 🖼️ Funcionalidades Implementadas
 
-* [x] **Home (Landing Page)**: Apresentação da marca Mintify.
-* [x] **Autenticação**: Telas de Login e Cadastro integradas.
-* [x] **Dashboard**: Resumo financeiro e métricas de desempenho.
-* [x] **Meus Produtos**: Listagem e controle de status de infoprodutos.
-* [x] **Financeiro**: Gestão de saldo e histórico de movimentações.
-* [x] **Perfil**: Painel de edição de dados do produtor.
+* [x] **Sistema de Autenticação JWT**: Login e Cadastro com senhas criptografadas.
+* [x] **Redirecionamento Inteligente**: Identifica se é o primeiro acesso e solicita configuração de perfil.
+* [x] **Configuração de Perfil**: Escolha entre Vendedor ou Aluno e cadastro de Chave PIX.
+* [x] **Dashboard Dinâmico**: Consumo de dados reais do backend via rotas protegidas.
+* [x] **Segurança de Rotas**: Proteção dupla (Frontend via `ProtectedRoute` e Backend via Token).

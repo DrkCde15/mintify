@@ -1,188 +1,248 @@
 /* ============================================================
-   1. VARIÁVEIS E RESET GLOBAL
+   1. RESET E VARIÁVEIS GLOBAIS
    ============================================================ */
 :root {
-  /* Paleta Mintify */
-  --primary: #10b981;        /* Verde Esmeralda */
-  --primary-dark: #059669;   /* Verde Escuro (Hover) */
-  --primary-light: #dcfce7;  /* Verde Claro (Fundos) */
-  
-  --bg-body: #f8fafc;        /* Cinza/Branco Off-white */
-  --bg-sidebar: #064e3b;     /* Verde Floresta (Sidebar) */
-  
-  --text-main: #0f172a;      /* Texto Principal (Escuro) */
-  --text-muted: #64748b;     /* Texto Secundário (Cinza) */
-  
+  --primary: #10b981;
+  --primary-dark: #059669;
+  --primary-light: #dcfce7;
+  --bg-body: #f8fafc;
+  --bg-sidebar: #064e3b;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
   --white: #ffffff;
-  --border: #e2e8f0;         /* Bordas Sutis */
-  
-  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 
-            0 2px 4px -1px rgba(0, 0, 0, 0.03);
-  --radius: 12px;
+  --border: #e2e8f0;
+  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+
+body { background-color: var(--bg-body); color: var(--text-main); line-height: 1.5; }
+
+/* Correção para inputs "invisíveis" nas suas fotos */
+input[type="text"], input[type="email"], input[type="password"], select, textarea {
+  width: 100%;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: white;
+  font-size: 1rem;
+  outline: none;
+  display: block;
+  margin-top: 0.5rem;
 }
 
-body {
-  background-color: var(--bg-body);
-  color: var(--text-main);
-  /* Removemos o overflow hidden do body para permitir scroll na Home se necessário */
-}
+input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-light); }
 
-a {
+.btn-primary {
+  background-color: var(--primary);
+  color: white !important;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
   text-decoration: none;
-  color: inherit;
+  transition: 0.2s;
+}
+
+.btn-primary:hover { background-color: var(--primary-dark); transform: translateY(-1px); }
+
+/* ============================================================
+   2. LANDING PAGE (HOME) - VERSÃO REPROJETADA
+   ============================================================ */
+.landing-page { 
+  background: radial-gradient(circle at top right, #f0fdf4 0%, #ffffff 50%); /* Fundo com leve toque esverdeado */
+  width: 100%; 
+  min-height: 100vh; 
+}
+
+.landing-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.2rem 10%;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px); /* Efeito de vidro no topo */
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  border-bottom: 1px solid var(--border);
+}
+
+.landing-nav .logo { 
+  font-size: 1.6rem; 
+  font-weight: 800; 
+  color: var(--primary); 
+  letter-spacing: -0.5px;
+}
+
+/* CONTAINER DOS BOTÕES DA DIREITA */
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 2rem; /* AQUI AFASTA O 'ENTRAR' DO 'COMEÇAR AGORA' */
+}
+
+.nav-actions .btn-text {
+  color: var(--text-main);
+  font-weight: 500;
+  transition: 0.2s;
+}
+
+.nav-actions .btn-text:hover {
+  color: var(--primary);
+}
+
+.hero-section {
+  padding: 10rem 10% 6rem 10%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Badge "Novo" acima do título */
+.hero-badge {
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  padding: 0.5rem 1rem;
+  border-radius: 99px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 1.5rem;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.hero-content h1 { 
+  font-size: 4rem; 
+  font-weight: 900; 
+  margin-bottom: 1.5rem; 
+  color: #111827; 
+  line-height: 1.1;
+  letter-spacing: -1px;
+}
+
+/* Destaque colorido no título */
+.hero-content h1 span {
+  color: var(--primary);
+}
+
+.hero-content p { 
+  font-size: 1.35rem; 
+  color: var(--text-muted); 
+  max-width: 750px; 
+  margin-bottom: 3rem; 
+  line-height: 1.6;
+}
+
+/* Ajuste nos benefícios abaixo do botão principal */
+.hero-features {
+  display: flex;
+  gap: 2rem;
+  margin-top: 2rem;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.hero-features span {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 /* ============================================================
-   2. LAYOUT DO DASHBOARD (ÁREA PRIVADA)
+   3. AUTENTICAÇÃO (LOGIN / CADASTRO / ESCOLHA)
+   ============================================================ */
+.auth-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  width: 100%;
+  padding: 20px;
+}
+
+.auth-card {
+  background: white;
+  padding: 2.5rem;
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  width: 100%;
+  max-width: 480px;
+  text-align: center;
+}
+
+.form-group { margin-bottom: 1.5rem; text-align: left; }
+.form-group label { font-weight: 600; font-size: 0.9rem; color: var(--text-main); }
+
+/* Grade de perfis (EscolhaPerfil) */
+.profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; margin-top: 2rem; }
+.profile-opt {
+  border: 2px solid var(--border);
+  padding: 1.5rem;
+  border-radius: 12px;
+  cursor: pointer;
+  background: white;
+  transition: 0.2s;
+}
+.profile-opt:hover { border-color: var(--primary); background: var(--primary-light); }
+
+/* ============================================================
+   4. DASHBOARD (SISTEMA INTERNO)
    ============================================================ */
 .dashboard-container {
   display: flex;
   height: 100vh;
   width: 100vw;
-  overflow: hidden; /* O App não rola, só o conteúdo principal */
+  text-align: left; /* Garante que nada interno seja centralizado por erro */
 }
 
-/* Sidebar */
 .sidebar {
   width: 260px;
   background-color: var(--bg-sidebar);
-  color: var(--white);
   padding: 2rem 1.2rem;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
 }
 
-.sidebar .logo {
-  font-size: 1.6rem;
-  font-weight: 800;
-  color: var(--primary);
-  margin-bottom: 3rem;
-  padding-left: 1rem;
-  letter-spacing: -0.5px;
-}
+.sidebar .logo { color: var(--primary); font-weight: 800; font-size: 1.5rem; margin-bottom: 2.5rem; }
 
-.nav-links {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
+.nav-links { display: flex; flex-direction: column; gap: 0.5rem; }
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 0.8rem;
-  color: #a7f3d0;
+  gap: 12px;
   padding: 0.8rem 1rem;
+  color: #a7f3d0;
   border-radius: 8px;
-  transition: all 0.2s ease;
+  text-decoration: none;
   font-weight: 500;
-  font-size: 0.95rem;
 }
+.nav-item:hover { background: rgba(255, 255, 255, 0.1); color: white; }
 
-.nav-item:hover {
-  color: var(--white);
-  background-color: rgba(255, 255, 255, 0.08);
-}
-
-/* Conteúdo Principal */
 .main-content {
   flex: 1;
-  padding: 2.5rem 3rem;
-  overflow-y: auto; /* Apenas esta área rola */
+  padding: 2.5rem 3.5rem;
+  overflow-y: auto;
   background-color: var(--bg-body);
 }
 
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 2.5rem;
-}
-
-.header h1 {
+/* Títulos das páginas internas (Financeiro, Alunos, etc) */
+.main-content h1, .main-content h2 {
   font-size: 1.8rem;
-  font-weight: 700;
-  color: var(--text-main);
-}
-
-/* Grids e Layouts Internos */
-.dashboard-grid-large {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 1.5rem;
-}
-
-@media (max-width: 1024px) {
-  .dashboard-grid-large {
-    grid-template-columns: 1fr;
-  }
+  font-weight: 800;
+  margin-bottom: 1.5rem;
+  color: #0f172a;
 }
 
 /* ============================================================
-   3. ELEMENTOS DE UI (BOTÕES, CARDS, INPUTS)
+   5. CARDS E GRIDS (USAR NO DASHBOARD E FINANCEIRO)
    ============================================================ */
-
-/* Botões */
-.btn-primary {
-  background-color: var(--primary);
-  color: var(--white);
-  border: none;
-  padding: 0.75rem 1.5rem;
-  border-radius: 8px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.6rem;
-  font-weight: 600;
-  font-size: 0.95rem;
-  transition: background 0.3s ease;
-}
-
-.btn-primary:hover {
-  background-color: var(--primary-dark);
-}
-
-.btn-secondary {
-  background-color: var(--white);
-  color: var(--text-main);
-  border: 1px solid var(--border);
-  padding: 0.75rem 1.5rem;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 600;
-  transition: all 0.2s;
-}
-
-.btn-secondary:hover {
-  background-color: #f1f5f9;
-}
-
-.btn-edit {
-  background: transparent;
-  border: 1px solid var(--primary);
-  color: var(--primary);
-  padding: 0.4rem 0.8rem;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.8rem;
-  font-weight: 600;
-}
-
-.btn-edit:hover {
-  background: var(--primary);
-  color: white;
-}
-
-/* Cards de Estatísticas */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -191,314 +251,31 @@ a {
 }
 
 .stat-card {
-  background: var(--white);
+  background: white;
   padding: 1.5rem;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+  border-radius: 12px;
   box-shadow: var(--shadow);
+  border: 1px solid var(--border);
 }
 
-.stat-card h3 {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
+.stat-card h3 { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+.stat-card p { font-size: 1.5rem; font-weight: 800; color: var(--text-main); }
+
+.card-white {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
 }
 
-.stat-card p {
-  font-size: 1.75rem;
-  font-weight: 800;
-  color: var(--bg-sidebar);
-}
-
-.icon-container {
-  background-color: var(--primary-light);
-  padding: 0.75rem;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Tabelas */
+/* Tabelas (Financeiro e Produtos) */
 .table-container {
-  background: var(--white);
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow);
-  overflow: hidden;
-  margin-bottom: 2rem;
-}
-
-.custom-table {
   width: 100%;
-  border-collapse: collapse;
-  text-align: left;
-}
-
-.custom-table th {
-  background-color: #f8fafc;
-  padding: 1rem 1.5rem;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  border-bottom: 1px solid var(--border);
-}
-
-.custom-table td {
-  padding: 1.2rem 1.5rem;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.95rem;
-  color: var(--text-main);
-}
-
-.custom-table tr:last-child td {
-  border-bottom: none;
-}
-
-.custom-table tr:hover {
-  background-color: #fcfcfc;
-}
-
-/* Badges e Labels */
-.badge-new {
-  background-color: var(--primary-light);
-  color: var(--primary-dark);
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 0.8rem;
-  font-weight: 700;
-  display: inline-block;
-  margin-bottom: 1rem;
-}
-
-.highlight {
-  color: var(--primary);
-}
-
-/* Formulários (Login, Cadastro, Perfil) */
-.form-group {
-  margin-bottom: 1.2rem;
-}
-
-.form-group label {
-  display: block;
-  font-size: 0.9rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-  color: var(--text-main);
-}
-
-.form-group input {
-  width: 100%;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 1rem;
-  background-color: #fff;
-  transition: all 0.2s;
-}
-
-.form-group input:focus {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--primary-light);
-}
-
-.form-group input:disabled {
-  background-color: #f1f5f9;
-  cursor: not-allowed;
-}
-
-/* ============================================================
-   4. PÁGINAS PÚBLICAS (HOME & AUTH)
-   ============================================================ */
-
-/* Landing Page */
-.landing-page {
-  width: 100%;
-  min-height: 100vh;
-  background: var(--white);
-  overflow-y: auto;
-}
-
-.landing-nav {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.5rem 5%;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.landing-nav .logo {
-  font-size: 1.5rem;
-  font-weight: 800;
-  color: var(--primary);
-}
-
-.nav-actions {
-  display: flex;
-  gap: 1.5rem;
-  align-items: center;
-}
-
-.btn-text {
-  font-weight: 600;
-  color: var(--text-muted);
-  transition: color 0.2s;
-}
-
-.btn-text:hover {
-  color: var(--text-main);
-}
-
-.hero-section {
-  text-align: center;
-  padding: 6rem 1rem;
-  max-width: 900px;
-  margin: 0 auto;
-}
-
-.hero-content h1 {
-  font-size: 3.5rem;
-  line-height: 1.1;
-  margin-bottom: 1.5rem;
-  color: #111827;
-  letter-spacing: -1px;
-}
-
-.hero-content p {
-  font-size: 1.25rem;
-  color: var(--text-muted);
-  margin-bottom: 3rem;
-  line-height: 1.6;
-}
-
-.hero-buttons {
-  display: flex;
-  justify-content: center;
-  gap: 1rem;
-}
-
-.btn-large {
-  padding: 1rem 2rem;
-  font-size: 1.1rem;
-}
-
-.hero-features {
-  display: flex;
-  justify-content: center;
-  gap: 2rem;
-  margin-top: 3rem;
-  color: var(--text-muted);
-  font-size: 0.95rem;
-}
-
-.hero-features span {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* Login e Cadastro (Auth) */
-.auth-container {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100vh;
-  background-color: var(--bg-body);
-  padding: 1rem;
-}
-
-.auth-card {
-  background: var(--white);
-  padding: 2.5rem;
-  border-radius: 16px;
-  box-shadow: var(--shadow);
-  width: 100%;
-  max-width: 420px;
-  border: 1px solid var(--border);
-}
-
-.auth-header {
-  text-align: center;
-  margin-bottom: 2rem;
-}
-
-.auth-header .logo {
-  font-size: 1.8rem;
-  font-weight: 800;
-  color: var(--primary);
-  display: block;
-}
-
-.auth-header h3 {
-  font-size: 1.5rem;
+  overflow-x: auto;
   margin-top: 1rem;
-  margin-bottom: 0.5rem;
 }
 
-.auth-header p {
-  color: var(--text-muted);
-  font-size: 0.95rem;
-}
-
-.w-full {
-  width: 100%;
-}
-
-.auth-footer {
-  margin-top: 1.5rem;
-  text-align: center;
-  font-size: 0.9rem;
-  color: var(--text-muted);
-}
-
-.auth-footer a {
-  color: var(--primary);
-  font-weight: 600;
-}
-
-.auth-footer a:hover {
-  text-decoration: underline;
-}
-
-/* ============================================================
-   5. UTILITÁRIOS E ANIMAÇÕES
-   ============================================================ */
-.fade-in {
-  animation: fadeIn 0.4s ease-out forwards;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.empty-state {
-  text-align: center;
-  padding: 4rem 2rem;
-  background: transparent;
-  border: 2px dashed var(--border);
-  border-radius: var(--radius);
-  color: var(--text-muted);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.trend-up {
-  font-size: 0.8rem;
-  color: var(--primary);
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 6px;
-}
+table { width: 100%; border-collapse: collapse; text-align: left; }
+th { padding: 1rem; border-bottom: 2px solid var(--border); color: var(--text-muted); font-size: 0.9rem; }
+td { padding: 1rem; border-bottom: 1px solid var(--border); color: var(--text-main); }
