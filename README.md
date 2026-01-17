@@ -35,7 +35,7 @@ O projeto é dividido em dois diretórios principais:
 
 * **Node.js** instalado.
 * **Python 3.9+** instalado.
-* **MySQL Server** rodando localmente (Crie um banco de dados chamado `verdim_db`).
+* **MySQL Server** rodando localmente (Crie um banco de dados chamado `mintify_db`).
 
 ### 2. Configurando o Backend (Servidor)
 
@@ -92,13 +92,3 @@ npm run dev
 * [x] **Meus Produtos**: Listagem e controle de status de infoprodutos.
 * [x] **Financeiro**: Gestão de saldo e histórico de movimentações.
 * [x] **Perfil**: Painel de edição de dados do produtor.
-
----
-
-## 🎨 Design System
-
-| Elemento | Cor (HEX) | Finalidade |
-| --- | --- | --- |
-| **Primary** | `#10B981` | Botões, Destaques e Sucesso |
-| **Sidebar** | `#064E3B` | Fundo do Menu de Navegação |
-| **Background** | `#F8FAFC` | Fundo da área de conteúdo |
