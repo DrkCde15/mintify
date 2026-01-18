@@ -36,7 +36,15 @@ class DashboardStats(BaseModel):
     vendas_hoje: int
     novos_alunos: int
 
+class UsuarioSimples(BaseModel):
+    nome: str
+    email: EmailStr
+    perfil: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
 class Token(BaseModel):
     access_token: str
     token_type: str
-    usuario: dict
+    usuario: UsuarioSimples

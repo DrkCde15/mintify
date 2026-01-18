@@ -75,15 +75,25 @@ def cadastrar_usuario(user: schemas.UsuarioCreate, db: Session = Depends(get_db)
 
 @app.post("/api/usuarios/login", response_model=schemas.Token)
 def login(dados: schemas.LoginRequest, db: Session = Depends(get_db)):
+    # 1. Busca o usuário pelo e-mail
     user = db.query(models.Usuario).filter(models.Usuario.email == dados.email).first()
-    if not user or not security.verificar_senha(dados.senha, user.senha):
-        raise HTTPException(status_code=401, detail="E-mail ou senha incorretos.")
     
+    # 2. Valida existência e senha
+    if not user or not security.verificar_senha(dados.senha, user.senha):
+        raise HTTPException(status_code=401, detail="E-mail ou senha incorretos")
+
+    # 3. Cria o token JWT
     access_token = security.criar_token_acesso(data={"sub": user.email})
+    
+    # 4. Retorna os dados conforme o schema atualizado
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "usuario": {"nome": user.nome, "email": user.email, "perfil": user.perfil}
+        "usuario": {
+            "nome": user.nome,
+            "email": user.email,
+            "perfil": user.perfil # Importante: o React lerá isso aqui
+        }
     }
 
 # ROTA CORRIGIDA (completar-perfil) para evitar erro 404

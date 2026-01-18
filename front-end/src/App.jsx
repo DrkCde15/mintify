@@ -19,15 +19,25 @@ import Produtos from './pages/Produtos';
 import Alunos from './pages/Alunos';
 import Financeiro from './pages/Financeiro';
 import Perfil from './pages/Perfil';
-import Marketplace from './pages/Marketplace'; // Importe o novo Marketplace
-import PerfilAluno from './pages/PerfilAluno'; // Importe o novo PerfilAluno
+import Marketplace from './pages/Marketplace';
+import PerfilAluno from './pages/PerfilAluno';
 
 // --- COMPONENTE DE PROTEÇÃO DE ROTA ---
-const ProtectedRoute = ({ children }) => {
+// Verifica se o usuário está logado e se tem permissão para a rota
+const ProtectedRoute = ({ children, roleRequired }) => {
   const token = localStorage.getItem('access_token');
+  const usuario = JSON.parse(localStorage.getItem('usuario') || '{}');
+  const perfil = usuario.perfil || localStorage.getItem('perfil');
+
   if (!token) {
     return <Navigate to="/login" replace />;
   }
+  
+  // Bloqueia acesso se o perfil for diferente do exigido pela rota
+  if (roleRequired && perfil !== roleRequired) {
+    return <Navigate to={perfil === 'vendedor' ? '/app' : '/app/marketplace'} replace />;
+  }
+
   return children;
 };
 
@@ -35,12 +45,13 @@ const ProtectedRoute = ({ children }) => {
 function DashboardLayout({ children }) {
   const location = useLocation();
   
-  // Pegamos o usuário logado para saber o perfil
+  // Obtemos os dados do usuário para controle de menu
   const usuario = JSON.parse(localStorage.getItem('usuario') || '{}');
-  const ehVendedor = usuario.perfil === 'vendedor';
+  const perfil = usuario.perfil || localStorage.getItem('perfil');
+  const ehVendedor = perfil === 'vendedor';
 
   const handleLogout = () => {
-    localStorage.clear(); // Limpa tudo (token e usuário)
+    localStorage.clear();
     window.location.href = '/login';
   };
 
@@ -50,7 +61,7 @@ function DashboardLayout({ children }) {
         <div className="logo">Mintify</div>
         <nav className="nav-links">
           {ehVendedor ? (
-            /* MENU DO VENDEDOR */
+            /* MENU DO VENDEDOR - Mantém o Perfil */
             <>
               <Link to="/app" className={`nav-item ${location.pathname === '/app' ? 'active' : ''}`}>
                 <LayoutDashboard size={20}/> Dashboard
@@ -64,12 +75,13 @@ function DashboardLayout({ children }) {
               <Link to="/app/financeiro" className={`nav-item ${location.pathname === '/app/financeiro' ? 'active' : ''}`}>
                 <DollarSign size={20}/> Financeiro
               </Link>
+              {/* O Perfil só aparece aqui para o vendedor */}
               <Link to="/app/perfil" className={`nav-item ${location.pathname === '/app/perfil' ? 'active' : ''}`}>
                 <User size={20}/> Perfil
               </Link>
             </>
           ) : (
-            /* MENU DO ALUNO */
+            /* MENU DO ALUNO - Perfil removido daqui */
             <>
               <Link to="/app/marketplace" className={`nav-item ${location.pathname === '/app/marketplace' ? 'active' : ''}`}>
                 <Store size={20}/> Mercado
@@ -81,7 +93,7 @@ function DashboardLayout({ children }) {
           )}
         </nav>
         
-        <button onClick={handleLogout} className="nav-item logout-btn" style={{marginTop: 'auto', background: 'none', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left'}}>
+        <button onClick={handleLogout} className="nav-item logout-btn" style={{marginTop: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#ff4d4d'}}>
           <LogOut size={20}/> Sair
         </button>
       </aside>
@@ -93,10 +105,13 @@ function DashboardLayout({ children }) {
 }
 
 function App() {
-  // Função auxiliar para decidir a página inicial do /app
+  // Função que decide qual página mostrar na rota "/app" baseada no perfil
   const getInitialRoute = () => {
     const usuario = JSON.parse(localStorage.getItem('usuario') || '{}');
-    return usuario.perfil === 'aluno' ? <Marketplace /> : <Dashboard />;
+    const perfil = usuario.perfil || localStorage.getItem('perfil');
+    
+    // Se for vendedor, renderiza Dashboard. Se for aluno, Marketplace.
+    return perfil === 'vendedor' ? <Dashboard /> : <Marketplace />;
   };
 
   return (
@@ -107,30 +122,31 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/cadastro" element={<Cadastro />} />
         
-        {/* Rota de Transição */}
+        {/* Rota de Transição para Novos Usuários */}
         <Route path="/escolha-perfil" element={
           <ProtectedRoute>
             <EscolhaPerfil />
           </ProtectedRoute>
         } />
 
-        {/* Rotas Privadas */}
+        {/* Rotas Privadas Agrupadas */}
         <Route path="/app/*" element={
           <ProtectedRoute>
             <DashboardLayout>
               <Routes>
-                {/* A rota index agora é inteligente: Aluno vê Marketplace, Vendedor vê Dashboard */}
+                {/* Rota inicial dinâmica /app */}
                 <Route index element={getInitialRoute()} />
                 
-                {/* Rotas de Vendedor */}
-                <Route path="produtos" element={<Produtos />} />
-                <Route path="alunos" element={<Alunos />} />
-                <Route path="financeiro" element={<Financeiro />} />
-                <Route path="perfil" element={<Perfil />} />
+                {/* Rotas restritas ao Vendedor */}
+                <Route path="produtos" element={<ProtectedRoute roleRequired="vendedor"><Produtos /></ProtectedRoute>} />
+                <Route path="alunos" element={<ProtectedRoute roleRequired="vendedor"><Alunos /></ProtectedRoute>} />
+                <Route path="financeiro" element={<ProtectedRoute roleRequired="vendedor"><Financeiro /></ProtectedRoute>} />
+                <Route path="perfil" element={<ProtectedRoute roleRequired="vendedor"><Perfil /></ProtectedRoute>} />
 
-                {/* Rotas de Aluno */}
+                {/* Rotas acessíveis ao Aluno */}
                 <Route path="marketplace" element={<Marketplace />} />
                 <Route path="meus-cursos" element={<PerfilAluno />} />
+                
               </Routes>
             </DashboardLayout>
           </ProtectedRoute>
