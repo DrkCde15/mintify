@@ -72,5 +72,8 @@ O projeto é dividido em dois diretórios principais:
 * [x] **Sistema de Autenticação**: Login e Cadastro com senhas criptografadas.
 * [x] **Configuração de Perfil**: Escolha entre Vendedor ou Aluno e cadastro de Chave PIX.
 * [x] **Dashboard Dinâmico**: Consumo de dados reais do backend via rotas protegidas.
-* [x] **Cadastro de Produtos**: Upload de arquivos (.zip, .pdf, vídeos) com armazenamento físico no servidor
-* [x] **Segurança de Rotas**: Proteção dupla (Frontend via `ProtectedRoute` e Backend via Token).
+* [x] **Cadastro de Produtos**: Upload de arquivos (.zip, .pdf, vídeos) com armazenamento físico no servidor.
+* [x] **Motor Financeiro**: Crédito automático na venda e débito no saque.
+* [x] **Marketplace**: Design inspirado no Mercado Livre, com cards interativos.
+* [x] **Biblioteca do Aluno**: Listagem exclusiva dos produtos comprados.
+* [x] **Segurança**: Rotas protegidas e validação de saldo.

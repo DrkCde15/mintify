@@ -1,25 +1,31 @@
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from typing import List
 from jose import JWTError, jwt
 import shutil
 import os
+import uuid
+from datetime import datetime
+
 import models, schemas, security
 from database import engine, get_db
 
-# Cria as tabelas automaticamente no MySQL ao iniciar
+# 1. Inicia as tabelas no Banco de Dados
 models.Base.metadata.create_all(bind=engine)
 
-# Configuração da pasta para salvar os arquivos
+# 2. Configuração de Pastas de Upload
 UPLOAD_DIR = "uploads"
-if not os.path.exists(UPLOAD_DIR):
-    os.makedirs(UPLOAD_DIR)
+IMG_DIR = os.path.join(UPLOAD_DIR, "imagens")
+FILES_DIR = os.path.join(UPLOAD_DIR, "arquivos")
+os.makedirs(IMG_DIR, exist_ok=True)
+os.makedirs(FILES_DIR, exist_ok=True)
 
-app = FastAPI(title="Mintify API")
+app = FastAPI(title="Mintify API - Marketplace Edition")
 
-# Configuração de CORS
+# 3. Configuração de CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"], 
@@ -28,6 +34,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Servir arquivos estáticos (Imagens e Produtos)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/usuarios/login")
 
 # --- DEPENDÊNCIA DE AUTENTICAÇÃO ---
@@ -35,7 +44,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/usuarios/login")
 def get_current_user(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Sessão expirada ou inválida.",
+        detail="Sessão inválida. Faça login novamente.",
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
@@ -47,13 +56,13 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     except JWTError:
         raise credentials_exception
 
-# --- ROTAS DE USUÁRIO ---
+# --- ROTAS DE USUÁRIO E PERFIL ---
 
 @app.post("/api/usuarios/cadastro", status_code=status.HTTP_201_CREATED)
 def cadastrar_usuario(user: schemas.UsuarioCreate, db: Session = Depends(get_db)):
     db_user = db.query(models.Usuario).filter(models.Usuario.email == user.email).first()
     if db_user:
-        raise HTTPException(status_code=400, detail="E-mail já cadastrado.")
+        raise HTTPException(status_code=400, detail="Este e-mail já está cadastrado.")
     
     novo_usuario = models.Usuario(
         nome=user.nome,
@@ -62,14 +71,13 @@ def cadastrar_usuario(user: schemas.UsuarioCreate, db: Session = Depends(get_db)
     )
     db.add(novo_usuario)
     db.commit()
-    db.refresh(novo_usuario)
-    return {"message": "Sucesso!", "id": novo_usuario.id}
+    return {"message": "Conta criada com sucesso!"}
 
 @app.post("/api/usuarios/login", response_model=schemas.Token)
 def login(dados: schemas.LoginRequest, db: Session = Depends(get_db)):
     user = db.query(models.Usuario).filter(models.Usuario.email == dados.email).first()
     if not user or not security.verificar_senha(dados.senha, user.senha):
-        raise HTTPException(status_code=401, detail="Credenciais inválidas.")
+        raise HTTPException(status_code=401, detail="E-mail ou senha incorretos.")
     
     access_token = security.criar_token_acesso(data={"sub": user.email})
     return {
@@ -78,67 +86,151 @@ def login(dados: schemas.LoginRequest, db: Session = Depends(get_db)):
         "usuario": {"nome": user.nome, "email": user.email, "perfil": user.perfil}
     }
 
+# ROTA CORRIGIDA (completar-perfil) para evitar erro 404
 @app.put("/api/usuarios/completar-perfil")
-def completar_perfil(dados: schemas.UsuarioUpdate, db: Session = Depends(get_db), current_user_email: str = Depends(get_current_user)):
-    db_user = db.query(models.Usuario).filter(models.Usuario.email == current_user_email).first()
-    if not db_user: raise HTTPException(status_code=404, detail="Usuário não encontrado")
+def completar_perfil(dados: schemas.UsuarioUpdate, db: Session = Depends(get_db), email: str = Depends(get_current_user)):
+    user = db.query(models.Usuario).filter(models.Usuario.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
     
-    db_user.perfil = dados.perfil
-    db_user.tipo_produto_interesse = dados.tipo_produto_interesse
-    if dados.chave_pix: db_user.chave_pix = dados.chave_pix
+    # Atualiza apenas o que foi enviado (evita sobrescrever com None)
+    if dados.perfil is not None:
+        user.perfil = dados.perfil
+        
+    if dados.tipo_produto_interesse is not None:
+        user.tipo_produto_interesse = dados.tipo_produto_interesse
+        
+    if dados.chave_pix is not None:
+        user.chave_pix = dados.chave_pix
     
     db.commit()
-    return {"message": "Perfil atualizado!"}
+    db.refresh(user) # Recarrega o objeto com os dados atualizados do banco
+    
+    return {
+        "message": "Perfil atualizado com sucesso!",
+        "usuario": {
+            "nome": user.nome,
+            "email": user.email,
+            "perfil": user.perfil
+        }
+    }
 
-# --- ROTAS DE PRODUTO ---
+# --- ROTAS DE PRODUTOS E MARKETPLACE ---
 
 @app.get("/api/produtos", response_model=List[schemas.ProdutoResponse])
-def listar_produtos(db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+def listar_produtos(db: Session = Depends(get_db), email: str = Depends(get_current_user)):
     return db.query(models.Produto).all()
 
 @app.post("/api/produtos/upload")
 async def upload_produto(
-    titulo: str = Form(...),
-    preco: float = Form(...),
-    descricao: str = Form(...),
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: str = Depends(get_current_user)
+    titulo: str = Form(...), preco: float = Form(...), descricao: str = Form(...),
+    arquivo_produto: UploadFile = File(...), imagem_capa: UploadFile = File(...),
+    db: Session = Depends(get_db), current_user: str = Depends(get_current_user)
 ):
-    """
-    Recebe arquivo + dados e salva no banco e na pasta uploads/
-    """
-    # Salva o arquivo fisicamente
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    # Salvar Arquivo do Produto (PDF/ZIP/MP4)
+    f_ext = os.path.splitext(arquivo_produto.filename)[1]
+    f_name = f"{uuid.uuid4()}{f_ext}"
+    with open(os.path.join(FILES_DIR, f_name), "wb") as b:
+        shutil.copyfileobj(arquivo_produto.file, b)
 
-    # Salva no MySQL
+    # Salvar Imagem de Capa
+    i_ext = os.path.splitext(imagem_capa.filename)[1]
+    i_name = f"{uuid.uuid4()}{i_ext}"
+    with open(os.path.join(IMG_DIR, i_name), "wb") as b:
+        shutil.copyfileobj(imagem_capa.file, b)
+
     novo_produto = models.Produto(
-        titulo=titulo,
-        preco=preco,
-        descricao=descricao,
-        arquivo_url=file_path,
+        titulo=titulo, preco=preco, descricao=descricao,
+        arquivo_url=f"uploads/arquivos/{f_name}",
+        imagem_url=f"uploads/imagens/{i_name}",
         vendedor_email=current_user
     )
     db.add(novo_produto)
     db.commit()
-    db.refresh(novo_produto)
-    return {"message": "Produto criado!", "id": novo_produto.id}
+    return {"message": "Produto cadastrado com sucesso!"}
 
-# --- OUTRAS ROTAS ---
+@app.post("/api/produtos/comprar/{produto_id}")
+def comprar_produto(produto_id: int, db: Session = Depends(get_db), email: str = Depends(get_current_user)):
+    prod = db.query(models.Produto).filter(models.Produto.id == produto_id).first()
+    if not prod:
+        raise HTTPException(status_code=404, detail="Produto não encontrado")
 
-@app.get("/api/dashboard", response_model=schemas.DashboardStats)
-def get_dashboard(db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
-    return {"saldo_total": 15780.00, "vendas_hoje": 12, "novos_alunos": 4}
+    ja_possui = db.query(models.Compra).filter(models.Compra.aluno_email == email, models.Compra.produto_id == produto_id).first()
+    if ja_possui:
+        raise HTTPException(status_code=400, detail="Você já possui este curso")
+
+    # 1. Registra a compra para o Aluno
+    db.add(models.Compra(aluno_email=email, produto_id=produto_id, valor_pago=prod.preco))
+    
+    # 2. Gera crédito financeiro para o Vendedor
+    db.add(models.Movimentacao(vendedor_email=prod.vendedor_email, valor=prod.preco, tipo='venda'))
+    
+    prod.vendas_count += 1
+    db.commit()
+    return {"message": "Compra realizada com sucesso!"}
+
+@app.get("/api/meus-cursos")
+def listar_meus_cursos(db: Session = Depends(get_db), email: str = Depends(get_current_user)):
+    return db.query(models.Produto).join(models.Compra).filter(models.Compra.aluno_email == email).all()
+
+# --- ROTAS FINANCEIRAS E DASHBOARD ---
+
+@app.get("/api/dashboard")
+def get_dashboard(db: Session = Depends(get_db), email: str = Depends(get_current_user)):
+    movs = db.query(models.Movimentacao).filter(models.Movimentacao.vendedor_email == email).all()
+    vendas = [m for m in movs if m.tipo == 'venda']
+    
+    saldo = sum(v.valor for v in vendas)
+    total_vendas = len(vendas)
+    
+    # Conta alunos únicos
+    total_alunos = db.query(models.Compra).join(models.Produto).filter(
+        models.Produto.vendedor_email == email
+    ).distinct(models.Compra.aluno_email).count()
+
+    return {
+        "saldo_total": saldo,
+        "vendas_hoje": total_vendas,
+        "novos_alunos": total_alunos
+    }
+
+@app.get("/api/financeiro/resumo")
+def get_financeiro(db: Session = Depends(get_db), email: str = Depends(get_current_user)):
+    movs = db.query(models.Movimentacao).filter(models.Movimentacao.vendedor_email == email).order_by(models.Movimentacao.data.desc()).all()
+    
+    vendas = sum(m.valor for m in movs if m.tipo == 'venda')
+    saques = sum(m.valor for m in movs if m.tipo == 'saque')
+    
+    return {
+        "saldo_total": vendas,
+        "saldo_disponivel": vendas - saques,
+        "historico": movs
+    }
+
+@app.post("/api/financeiro/saque")
+def solicitar_saque(dados: dict, db: Session = Depends(get_db), email: str = Depends(get_current_user)):
+    valor = float(dados.get("valor", 0))
+    
+    # Validação de saldo
+    movs = db.query(models.Movimentacao).filter(models.Movimentacao.vendedor_email == email).all()
+    disponivel = sum(m.valor for m in movs if m.tipo == 'venda') - sum(m.valor for m in movs if m.tipo == 'saque')
+    
+    if valor > disponivel:
+        raise HTTPException(status_code=400, detail="Saldo insuficiente para este saque.")
+
+    db.add(models.Movimentacao(
+        vendedor_email=email, 
+        valor=valor, 
+        tipo='saque', 
+        status='pendente', 
+        chave_pix=dados.get("chave_pix")
+    ))
+    db.commit()
+    return {"message": "Solicitação de saque enviada!"}
 
 @app.get("/api/alunos")
-def listar_alunos(db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
-    return db.query(models.Aluno).all()
-
-@app.get("/api/financeiro")
-def get_financeiro(db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
-    return {
-        "saldo": 15780.00,
-        "saques": [{"id": 1, "data": "2024-03-10", "valor": 500.0, "status": "Concluído"}]
-    }
+def listar_alunos_vendedor(db: Session = Depends(get_db), email: str = Depends(get_current_user)):
+    # Lista usuários que compraram produtos deste vendedor
+    return db.query(models.Usuario).join(models.Compra, models.Usuario.email == models.Compra.aluno_email)\
+             .join(models.Produto, models.Compra.produto_id == models.Produto.id)\
+             .filter(models.Produto.vendedor_email == email).all()
