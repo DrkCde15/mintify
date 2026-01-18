@@ -51,6 +51,7 @@ uvicorn main:app --reload
 ```bash
 cd front-end
 npm install
+npm install axios
 npm run dev
 
 ```
@@ -68,8 +69,8 @@ O projeto é dividido em dois diretórios principais:
 
 ## 🖼️ Funcionalidades Implementadas
 
-* [x] **Sistema de Autenticação JWT**: Login e Cadastro com senhas criptografadas.
-* [x] **Redirecionamento Inteligente**: Identifica se é o primeiro acesso e solicita configuração de perfil.
+* [x] **Sistema de Autenticação**: Login e Cadastro com senhas criptografadas.
 * [x] **Configuração de Perfil**: Escolha entre Vendedor ou Aluno e cadastro de Chave PIX.
 * [x] **Dashboard Dinâmico**: Consumo de dados reais do backend via rotas protegidas.
+* [x] **Cadastro de Produtos**: Upload de arquivos (.zip, .pdf, vídeos) com armazenamento físico no servidor
 * [x] **Segurança de Rotas**: Proteção dupla (Frontend via `ProtectedRoute` e Backend via Token).

@@ -18,23 +18,26 @@ class Produto(Base):
     __tablename__ = "produtos"
     id = Column(Integer, primary_key=True, index=True)
     titulo = Column(String(150), nullable=False)
-    tipo = Column(String(50), default="Curso Online") # E-book, Mentoria, etc.
+    descricao = Column(String(500), nullable=True) # <--- NOVO: Breve descrição
+    tipo = Column(String(50), default="Curso Online") 
     preco = Column(Float, nullable=False)
-    status = Column(String(20), default="Ativo")   # Ativo, Rascunho
+    arquivo_url = Column(String(255), nullable=True) # <--- NOVO: Caminho do arquivo (.zip, .pdf, etc)
+    vendedor_email = Column(String(100), nullable=False) # <--- NOVO: Quem é o dono do produto
+    status = Column(String(20), default="Ativo")   
     vendas_count = Column(Integer, default=0)
+    criado_em = Column(DateTime(timezone=True), server_default=func.now())
 
 class Transacao(Base):
     __tablename__ = "transacoes"
     id = Column(Integer, primary_key=True, index=True)
     valor = Column(Float, nullable=False)
-    status = Column(String(20), default="Pago") # Pago, Pendente, Cancelado
+    status = Column(String(20), default="Pago") 
     data = Column(DateTime(timezone=True), server_default=func.now())
     
 class Aluno(Base):
     __tablename__ = "alunos"
-
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String(100), nullable=False)
     email = Column(String(100), unique=True, index=True, nullable=False)
-    status = Column(String(20), default="Ativo") # Ativo, Bloqueado, Atrasado
+    status = Column(String(20), default="Ativo") 
     data_entrada = Column(DateTime(timezone=True), server_default=func.now())

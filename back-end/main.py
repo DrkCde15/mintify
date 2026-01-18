@@ -1,19 +1,25 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from typing import List
 from jose import JWTError, jwt
-
+import shutil
+import os
 import models, schemas, security
 from database import engine, get_db
 
 # Cria as tabelas automaticamente no MySQL ao iniciar
 models.Base.metadata.create_all(bind=engine)
 
+# Configuração da pasta para salvar os arquivos
+UPLOAD_DIR = "uploads"
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR)
+
 app = FastAPI(title="Mintify API")
 
-# Configuração de CORS (Essencial para comunicação com o React)
+# Configuração de CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"], 
@@ -22,18 +28,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configuração do esquema de segurança para o Swagger e proteção de rotas
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/usuarios/login")
 
 # --- DEPENDÊNCIA DE AUTENTICAÇÃO ---
 
 def get_current_user(token: str = Depends(oauth2_scheme)):
-    """
-    Verifica o token JWT e retorna o e-mail do usuário logado.
-    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Sessão expirada ou inválida. Por favor, faça login novamente.",
+        detail="Sessão expirada ou inválida.",
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
@@ -45,13 +47,13 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     except JWTError:
         raise credentials_exception
 
-# --- ROTAS DE USUÁRIO E AUTENTICAÇÃO ---
+# --- ROTAS DE USUÁRIO ---
 
 @app.post("/api/usuarios/cadastro", status_code=status.HTTP_201_CREATED)
 def cadastrar_usuario(user: schemas.UsuarioCreate, db: Session = Depends(get_db)):
     db_user = db.query(models.Usuario).filter(models.Usuario.email == user.email).first()
     if db_user:
-        raise HTTPException(status_code=400, detail="Este e-mail já está cadastrado.")
+        raise HTTPException(status_code=400, detail="E-mail já cadastrado.")
     
     novo_usuario = models.Usuario(
         nome=user.nome,
@@ -61,92 +63,82 @@ def cadastrar_usuario(user: schemas.UsuarioCreate, db: Session = Depends(get_db)
     db.add(novo_usuario)
     db.commit()
     db.refresh(novo_usuario)
-    return {"message": "Conta criada com sucesso!", "id": novo_usuario.id}
+    return {"message": "Sucesso!", "id": novo_usuario.id}
 
 @app.post("/api/usuarios/login", response_model=schemas.Token)
 def login(dados: schemas.LoginRequest, db: Session = Depends(get_db)):
     user = db.query(models.Usuario).filter(models.Usuario.email == dados.email).first()
-    
     if not user or not security.verificar_senha(dados.senha, user.senha):
-        raise HTTPException(status_code=401, detail="E-mail ou senha incorretos.")
+        raise HTTPException(status_code=401, detail="Credenciais inválidas.")
     
     access_token = security.criar_token_acesso(data={"sub": user.email})
-    
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "usuario": {
-            "nome": user.nome,
-            "email": user.email,
-            "perfil": user.perfil
-        }
+        "usuario": {"nome": user.nome, "email": user.email, "perfil": user.perfil}
     }
 
 @app.put("/api/usuarios/completar-perfil")
-def completar_perfil(
-    dados: schemas.UsuarioUpdate, 
-    db: Session = Depends(get_db), 
-    current_user_email: str = Depends(get_current_user)
-):
-    """
-    Atualiza as informações adicionais do usuário logado que estão como NULL no banco.
-    """
+def completar_perfil(dados: schemas.UsuarioUpdate, db: Session = Depends(get_db), current_user_email: str = Depends(get_current_user)):
     db_user = db.query(models.Usuario).filter(models.Usuario.email == current_user_email).first()
+    if not db_user: raise HTTPException(status_code=404, detail="Usuário não encontrado")
     
-    if not db_user:
-        raise HTTPException(status_code=404, detail="Usuário não encontrado")
-
-    # Atualiza os campos que estavam nulos após o cadastro inicial
     db_user.perfil = dados.perfil
     db_user.tipo_produto_interesse = dados.tipo_produto_interesse
-    if dados.chave_pix:
-        db_user.chave_pix = dados.chave_pix
-
+    if dados.chave_pix: db_user.chave_pix = dados.chave_pix
+    
     db.commit()
-    db.refresh(db_user)
-    return {"message": "Perfil atualizado com sucesso!"}
+    return {"message": "Perfil atualizado!"}
 
-# --- ROTAS DE NEGÓCIO (PROTEGIDAS) ---
-
-@app.get("/api/dashboard", response_model=schemas.DashboardStats)
-def get_dashboard(
-    db: Session = Depends(get_db), 
-    current_user: str = Depends(get_current_user)
-):
-    # Mock de dados para o dashboard
-    return {
-        "saldo_total": 15780.00,
-        "vendas_hoje": 12,
-        "novos_alunos": 4
-    }
+# --- ROTAS DE PRODUTO ---
 
 @app.get("/api/produtos", response_model=List[schemas.ProdutoResponse])
-def listar_produtos(
-    db: Session = Depends(get_db),
-    current_user: str = Depends(get_current_user)
-):
+def listar_produtos(db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     return db.query(models.Produto).all()
 
-@app.get("/api/alunos")
-def listar_alunos(
+@app.post("/api/produtos/upload")
+async def upload_produto(
+    titulo: str = Form(...),
+    preco: float = Form(...),
+    descricao: str = Form(...),
+    file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: str = Depends(get_current_user)
 ):
-    # Retorna todos os alunos do banco de dados
+    """
+    Recebe arquivo + dados e salva no banco e na pasta uploads/
+    """
+    # Salva o arquivo fisicamente
+    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    # Salva no MySQL
+    novo_produto = models.Produto(
+        titulo=titulo,
+        preco=preco,
+        descricao=descricao,
+        arquivo_url=file_path,
+        vendedor_email=current_user
+    )
+    db.add(novo_produto)
+    db.commit()
+    db.refresh(novo_produto)
+    return {"message": "Produto criado!", "id": novo_produto.id}
+
+# --- OUTRAS ROTAS ---
+
+@app.get("/api/dashboard", response_model=schemas.DashboardStats)
+def get_dashboard(db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    return {"saldo_total": 15780.00, "vendas_hoje": 12, "novos_alunos": 4}
+
+@app.get("/api/alunos")
+def listar_alunos(db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     return db.query(models.Aluno).all()
 
 @app.get("/api/financeiro")
-def get_financeiro(
-    db: Session = Depends(get_db),
-    current_user: str = Depends(get_current_user)
-):
-    """
-    Retorna o saldo e o histórico de saques.
-    """
+def get_financeiro(db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     return {
         "saldo": 15780.00,
-        "saques": [
-            {"id": 1, "data": "2024-03-10", "valor": 500.00, "status": "Concluído"},
-            {"id": 2, "data": "2024-03-15", "valor": 1200.00, "status": "Processando"}
-        ]
+        "saques": [{"id": 1, "data": "2024-03-10", "valor": 500.0, "status": "Concluído"}]
     }
