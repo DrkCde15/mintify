@@ -8,10 +8,11 @@ from jose import JWTError, jwt
 import shutil
 import os
 import uuid
-from datetime import datetime
 
+# Importações locais do seu projeto
 import models, schemas, security
 from database import engine, get_db
+from utils.email import enviar_notificacao_venda  # <-- IMPORTANTE: Utilitário do Resend
 
 # 1. Inicia as tabelas no Banco de Dados
 models.Base.metadata.create_all(bind=engine)
@@ -75,46 +76,38 @@ def cadastrar_usuario(user: schemas.UsuarioCreate, db: Session = Depends(get_db)
 
 @app.post("/api/usuarios/login", response_model=schemas.Token)
 def login(dados: schemas.LoginRequest, db: Session = Depends(get_db)):
-    # 1. Busca o usuário pelo e-mail
     user = db.query(models.Usuario).filter(models.Usuario.email == dados.email).first()
     
-    # 2. Valida existência e senha
     if not user or not security.verificar_senha(dados.senha, user.senha):
         raise HTTPException(status_code=401, detail="E-mail ou senha incorretos")
 
-    # 3. Cria o token JWT
     access_token = security.criar_token_acesso(data={"sub": user.email})
     
-    # 4. Retorna os dados conforme o schema atualizado
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "usuario": {
             "nome": user.nome,
             "email": user.email,
-            "perfil": user.perfil # Importante: o React lerá isso aqui
+            "perfil": user.perfil 
         }
     }
 
-# ROTA CORRIGIDA (completar-perfil) para evitar erro 404
 @app.put("/api/usuarios/completar-perfil")
 def completar_perfil(dados: schemas.UsuarioUpdate, db: Session = Depends(get_db), email: str = Depends(get_current_user)):
     user = db.query(models.Usuario).filter(models.Usuario.email == email).first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
     
-    # Atualiza apenas o que foi enviado (evita sobrescrever com None)
     if dados.perfil is not None:
         user.perfil = dados.perfil
-        
     if dados.tipo_produto_interesse is not None:
         user.tipo_produto_interesse = dados.tipo_produto_interesse
-        
     if dados.chave_pix is not None:
         user.chave_pix = dados.chave_pix
     
     db.commit()
-    db.refresh(user) # Recarrega o objeto com os dados atualizados do banco
+    db.refresh(user)
     
     return {
         "message": "Perfil atualizado com sucesso!",
@@ -137,13 +130,11 @@ async def upload_produto(
     arquivo_produto: UploadFile = File(...), imagem_capa: UploadFile = File(...),
     db: Session = Depends(get_db), current_user: str = Depends(get_current_user)
 ):
-    # Salvar Arquivo do Produto (PDF/ZIP/MP4)
     f_ext = os.path.splitext(arquivo_produto.filename)[1]
     f_name = f"{uuid.uuid4()}{f_ext}"
     with open(os.path.join(FILES_DIR, f_name), "wb") as b:
         shutil.copyfileobj(arquivo_produto.file, b)
 
-    # Salvar Imagem de Capa
     i_ext = os.path.splitext(imagem_capa.filename)[1]
     i_name = f"{uuid.uuid4()}{i_ext}"
     with open(os.path.join(IMG_DIR, i_name), "wb") as b:
@@ -169,15 +160,32 @@ def comprar_produto(produto_id: int, db: Session = Depends(get_db), email: str =
     if ja_possui:
         raise HTTPException(status_code=400, detail="Você já possui este curso")
 
-    # 1. Registra a compra para o Aluno
-    db.add(models.Compra(aluno_email=email, produto_id=produto_id, valor_pago=prod.preco))
-    
-    # 2. Gera crédito financeiro para o Vendedor
-    db.add(models.Movimentacao(vendedor_email=prod.vendedor_email, valor=prod.preco, tipo='venda'))
-    
-    prod.vendas_count += 1
-    db.commit()
-    return {"message": "Compra realizada com sucesso!"}
+    try:
+        # 1. Registra a compra para o Aluno
+        db.add(models.Compra(aluno_email=email, produto_id=produto_id, valor_pago=prod.preco))
+        
+        # 2. Gera crédito financeiro para o Vendedor
+        db.add(models.Movimentacao(vendedor_email=prod.vendedor_email, valor=prod.preco, tipo='venda'))
+        
+        # 3. Atualiza contador de vendas
+        prod.vendas_count += 1
+        
+        # Salva tudo no banco antes de enviar o e-mail
+        db.commit()
+
+        # 4. GATILHO DE E-MAIL (RESEND)
+        # Enviamos a notificação para o vendedor_email que está no produto
+        enviar_notificacao_venda(
+            email_vendedor=prod.vendedor_email,
+            nome_produto=prod.titulo,
+            valor=prod.preco
+        )
+
+        return {"message": "Compra realizada com sucesso e vendedor notificado!"}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Erro no processamento: {str(e)}")
 
 @app.get("/api/meus-cursos")
 def listar_meus_cursos(db: Session = Depends(get_db), email: str = Depends(get_current_user)):
@@ -193,7 +201,6 @@ def get_dashboard(db: Session = Depends(get_db), email: str = Depends(get_curren
     saldo = sum(v.valor for v in vendas)
     total_vendas = len(vendas)
     
-    # Conta alunos únicos
     total_alunos = db.query(models.Compra).join(models.Produto).filter(
         models.Produto.vendedor_email == email
     ).distinct(models.Compra.aluno_email).count()
@@ -220,8 +227,6 @@ def get_financeiro(db: Session = Depends(get_db), email: str = Depends(get_curre
 @app.post("/api/financeiro/saque")
 def solicitar_saque(dados: dict, db: Session = Depends(get_db), email: str = Depends(get_current_user)):
     valor = float(dados.get("valor", 0))
-    
-    # Validação de saldo
     movs = db.query(models.Movimentacao).filter(models.Movimentacao.vendedor_email == email).all()
     disponivel = sum(m.valor for m in movs if m.tipo == 'venda') - sum(m.valor for m in movs if m.tipo == 'saque')
     
@@ -240,7 +245,6 @@ def solicitar_saque(dados: dict, db: Session = Depends(get_db), email: str = Dep
 
 @app.get("/api/alunos")
 def listar_alunos_vendedor(db: Session = Depends(get_db), email: str = Depends(get_current_user)):
-    # Lista usuários que compraram produtos deste vendedor
     return db.query(models.Usuario).join(models.Compra, models.Usuario.email == models.Compra.aluno_email)\
              .join(models.Produto, models.Compra.produto_id == models.Produto.id)\
              .filter(models.Produto.vendedor_email == email).all()

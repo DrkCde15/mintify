@@ -77,3 +77,4 @@ O projeto é dividido em dois diretórios principais:
 * [x] **Marketplace**: Design inspirado no Mercado Livre, com cards interativos.
 * [x] **Biblioteca do Aluno**: Listagem exclusiva dos produtos comprados.
 * [x] **Segurança**: Rotas protegidas e validação de saldo.
+* [x] **Envio de E-mails**: Envia e-mails aos vendedores que realizaram uma venda.
