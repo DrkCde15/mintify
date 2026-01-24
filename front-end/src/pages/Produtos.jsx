@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, X, Upload, FileText, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { Plus, X, Upload, FileText, Image as ImageIcon, Loader2, Video } from 'lucide-react'; // Adicionado Video icon
 import api from '../api';
 
 export default function Produtos() {
@@ -11,9 +11,10 @@ export default function Produtos() {
   const [enviando, setEnviando] = useState(false);
   const [form, setForm] = useState({ titulo: '', preco: '', descricao: '' });
   
-  // Estados para os arquivos
-  const [arquivoProduto, setArquivoProduto] = useState(null);
-  const [imagemCapa, setImagemCapa] = useState(null);
+  // Estados para os arquivos (agora múltiplos) e tipo de produto
+  const [imagens, setImagens] = useState([]);
+  const [arquivos, setArquivos] = useState([]); // Pode incluir PDFs, vídeos, etc.
+  const [tipoProduto, setTipoProduto] = useState('Curso Online'); // Novo estado
 
   useEffect(() => {
     fetchProdutos();
@@ -21,6 +22,7 @@ export default function Produtos() {
 
   const fetchProdutos = async () => {
     try {
+      // Endpoint de produtos agora retorna com mídias
       const response = await api.get('/api/produtos');
       setProdutos(response.data);
     } catch (error) {
@@ -30,29 +32,35 @@ export default function Produtos() {
     }
   };
 
-  const handleProductFileChange = (e) => {
-    const file = e.target.files[0];
-    if (file) setArquivoProduto(file);
+  const handleImageChange = (e) => {
+    setImagens(Array.from(e.target.files));
   };
 
-  const handleCoverImageChange = (e) => {
-    const file = e.target.files[0];
-    if (file) setImagemCapa(file);
+  const handleFileChange = (e) => {
+    setArquivos(Array.from(e.target.files));
   };
 
   const handleUpload = async (e) => {
     e.preventDefault();
-    if (!arquivoProduto) return alert("Selecione o arquivo do conteúdo.");
-    if (!imagemCapa) return alert("Selecione uma imagem de capa para a vitrine.");
+    if (imagens.length === 0) return alert("Selecione pelo menos uma imagem para a vitrine.");
+    // Conteúdo do produto pode ser opcional se for um produto físico sem arquivos digitais
+    // if (arquivos.length === 0) return alert("Selecione pelo menos um arquivo de conteúdo para o produto.");
 
     setEnviando(true);
     
     const formData = new FormData();
-    formData.append('arquivo_produto', arquivoProduto);
-    formData.append('imagem_capa', imagemCapa);
     formData.append('titulo', form.titulo);
     formData.append('preco', form.preco);
     formData.append('descricao', form.descricao);
+    formData.append('tipo_produto', tipoProduto); // Adicionado o tipo de produto
+
+    imagens.forEach((file) => {
+      formData.append('imagens', file);
+    });
+
+    arquivos.forEach((file) => {
+      formData.append('arquivos', file);
+    });
 
     try {
       await api.post('/api/produtos/upload', formData, {
@@ -62,9 +70,9 @@ export default function Produtos() {
       alert("Produto cadastrado com sucesso!");
       fecharModal();
       fetchProdutos();
-    // eslint-disable-next-line no-unused-vars
     } catch (error) {
-      alert("Erro ao carregar produto. Verifique se o backend está rodando.");
+      console.error("Erro ao carregar produto:", error.response?.data?.detail || error.message);
+      alert("Erro ao cadastrar produto. Verifique o console para mais detalhes.");
     } finally {
       setEnviando(false);
     }
@@ -73,9 +81,13 @@ export default function Produtos() {
   const fecharModal = () => {
     setModalAberto(false);
     setForm({ titulo: '', preco: '', descricao: '' });
-    setArquivoProduto(null);
-    setImagemCapa(null);
+    setImagens([]);
+    setArquivos([]);
+    setTipoProduto('Curso Online');
   };
+
+  // Helper para exibir nomes dos arquivos selecionados
+  const getFileNames = (fileList) => fileList.map(f => f.name).join(', ') || 'Nenhum arquivo selecionado.';
 
   return (
     <div className="main-content fade-in">
@@ -93,18 +105,26 @@ export default function Produtos() {
               <tr>
                 <th>Produto</th>
                 <th>Preço</th>
+                <th>Tipo</th> {/* Nova coluna */}
                 <th>Vendas</th>
+                <th>Mídias</th> {/* Nova coluna */}
               </tr>
             </thead>
             <tbody>
               {produtos.map(p => (
                 <tr key={p.id}>
                   <td style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
-                    <FileText size={20} color="var(--text-muted)" />
+                    {p.midias && p.midias.length > 0 && p.midias[0].tipo === 'imagem' && p.midias[0].url ? (
+                        <img src={`http://localhost:8000/${p.midias[0].url}`} alt={p.titulo} style={{width: '40px', height: '40px', objectFit: 'cover', borderRadius: '4px'}} />
+                    ) : (
+                        <FileText size={20} color="var(--text-muted)" />
+                    )}
                     <strong>{p.titulo}</strong>
                   </td>
                   <td>R$ {parseFloat(p.preco).toFixed(2)}</td>
+                  <td>{p.tipo}</td> {/* Exibir tipo */}
                   <td>{p.vendas_count || 0}</td>
+                  <td>{p.midias ? p.midias.length : 0}</td> {/* Exibir count de mídias */}
                 </tr>
               ))}
             </tbody>
@@ -134,31 +154,46 @@ export default function Produtos() {
                 <textarea rows="2" required placeholder="Explique brevemente o que é o produto" value={form.descricao} onChange={e => setForm({ ...form, descricao: e.target.value })} 
                   style={{ width: '100%', padding: '0.8rem', border: '1px solid var(--border)', borderRadius: '8px' }} />
               </div>
+              <div className="form-group">
+                <label>Tipo de Produto</label>
+                <select value={tipoProduto} onChange={e => setTipoProduto(e.target.value)}>
+                    <option value="Curso Online">Curso Online</option>
+                    <option value="E-book">E-book</option>
+                    <option value="Software">Software</option>
+                    <option value="Serviço">Serviço</option>
+                    <option value="Outro">Outro</option>
+                </select>
+              </div>
 
-              {/* UPLOAD DE CAPA */}
-              <p style={{fontWeight: 600, marginBottom: '0.5rem', marginTop: '1.5rem'}}>1. Imagem de Capa (JPG/PNG)</p>
+              {/* UPLOAD DE IMAGENS */}
+              <p style={{fontWeight: 600, marginBottom: '0.5rem', marginTop: '1.5rem'}}>1. Imagens da Vitrine (JPG/PNG)</p>
               <div className="file-upload-box" style={{margin: '0.5rem 0 1.5rem 0'}}>
-                <input type="file" id="cover-input" onChange={handleCoverImageChange} style={{ display: 'none' }} accept="image/*"/>
-                <label htmlFor="cover-input" className="file-label">
-                  {imagemCapa ? <><ImageIcon size={20} color="#10b981" /> {imagemCapa.name}</> : <><ImageIcon size={20} /> Selecionar Imagem da Vitrine</>}
+                <input type="file" id="images-input" multiple onChange={handleImageChange} style={{ display: 'none' }} accept="image/*"/>
+                <label htmlFor="images-input" className="file-label">
+                  {imagens.length > 0 ? (
+                    <><ImageIcon size={20} color="#10b981" /> {getFileNames(imagens)}</>
+                  ) : (
+                    <><ImageIcon size={20} /> Selecionar Imagens (múltiplas)</>
+                  )}
                 </label>
               </div>
 
-              {/* UPLOAD DE ARQUIVO MULTIFORMATO */}
-              <p style={{fontWeight: 600, marginBottom: '0.5rem'}}>2. Conteúdo do Produto (Todos os formatos)</p>
+              {/* UPLOAD DE ARQUIVOS (CONTEÚDO DO PRODUTO) */}
+              <p style={{fontWeight: 600, marginBottom: '0.5rem'}}>2. Conteúdo do Produto (Opcional, todos os formatos)</p>
               <div className="file-upload-box" style={{marginTop: '0.5rem'}}>
                 <input 
                   type="file" 
-                  id="file-input" 
-                  onChange={handleProductFileChange} 
+                  id="files-input" 
+                  multiple
+                  onChange={handleFileChange} 
                   style={{ display: 'none' }} 
                   accept=".doc,.docx,.pdf,.zip,.mp3,.mp4,audio/*,video/*"
                 />
-                <label htmlFor="file-input" className="file-label">
-                  {arquivoProduto ? (
-                    <><Upload size={20} color="#10b981" /> {arquivoProduto.name}</>
+                <label htmlFor="files-input" className="file-label">
+                  {arquivos.length > 0 ? (
+                    <><Upload size={20} color="#10b981" /> {getFileNames(arquivos)}</>
                   ) : (
-                    <><Upload size={20} /> Selecionar arquivo (Doc, PDF, Zip, MP3, MP4)</>
+                    <><Upload size={20} /> Selecionar arquivos (múltiplos: Doc, PDF, Zip, MP3, MP4)</>
                   )}
                 </label>
               </div>

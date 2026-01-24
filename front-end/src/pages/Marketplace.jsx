@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api';
+import { ImageIcon } from 'lucide-react'; // Importar ImageIcon
 
 function Marketplace() {
   const [produtos, setProdutos] = useState([]);
@@ -24,7 +25,14 @@ function Marketplace() {
         {produtos.map(p => (
           <div key={p.id} className="product-card">
             <div className="product-image-container">
-              <img src={`http://127.0.0.1:8000/${p.imagem_url}`} alt={p.titulo} className="product-image" />
+              {p.midias && p.midias.length > 0 && p.midias[0].url ? (
+                <img src={`http://127.0.0.1:8000/${p.midias[0].url}`} alt={p.titulo} className="product-image" />
+              ) : (
+                <div className="product-image-placeholder">
+                  <ImageIcon size={48} color="var(--text-muted)" />
+                  <p>Sem imagem</p>
+                </div>
+              )}
             </div>
             <div className="product-details">
               <span className="badge-promo">Oferta do Dia</span>

@@ -2,17 +2,18 @@ from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, F
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.orm import Session
-from typing import List
+from sqlalchemy.orm import Session, joinedload 
+from typing import List, Optional # Adicionado Optional
 from jose import JWTError, jwt
 import shutil
 import os
 import uuid
+from sqlalchemy import or_ # Adicionado para busca com OR
 
 # Importações locais do seu projeto
 import models, schemas, security
 from database import engine, get_db
-from utils.email import enviar_notificacao_venda  # <-- IMPORTANTE: Utilitário do Resend
+from utils.email import enviar_notificacao_venda  
 
 # 1. Inicia as tabelas no Banco de Dados
 models.Base.metadata.create_all(bind=engine)
@@ -121,34 +122,137 @@ def completar_perfil(dados: schemas.UsuarioUpdate, db: Session = Depends(get_db)
 # --- ROTAS DE PRODUTOS E MARKETPLACE ---
 
 @app.get("/api/produtos", response_model=List[schemas.ProdutoResponse])
-def listar_produtos(db: Session = Depends(get_db), email: str = Depends(get_current_user)):
-    return db.query(models.Produto).all()
+def listar_produtos(db: Session = Depends(get_db)): # Removed email dependency for public access to products
+    return db.query(models.Produto).options(joinedload(models.Produto.midias)).all()
 
-@app.post("/api/produtos/upload")
+@app.post("/api/produtos/upload", status_code=status.HTTP_201_CREATED)
 async def upload_produto(
-    titulo: str = Form(...), preco: float = Form(...), descricao: str = Form(...),
-    arquivo_produto: UploadFile = File(...), imagem_capa: UploadFile = File(...),
-    db: Session = Depends(get_db), current_user: str = Depends(get_current_user)
+    titulo: str = Form(...), 
+    preco: float = Form(...), 
+    descricao: str = Form(...),
+    tipo_produto: str = Form("Curso Online"), # Novo campo para tipo de produto
+    imagens: List[UploadFile] = File([]), # Lista de imagens
+    arquivos: List[UploadFile] = File([]), # Lista de outros arquivos (vídeos, documentos)
+    db: Session = Depends(get_db), 
+    current_user_email: str = Depends(get_current_user)
 ):
-    f_ext = os.path.splitext(arquivo_produto.filename)[1]
-    f_name = f"{uuid.uuid4()}{f_ext}"
-    with open(os.path.join(FILES_DIR, f_name), "wb") as b:
-        shutil.copyfileobj(arquivo_produto.file, b)
+    if not imagens and not arquivos:
+        raise HTTPException(status_code=400, detail="Pelo menos uma imagem ou um arquivo deve ser enviado.")
 
-    i_ext = os.path.splitext(imagem_capa.filename)[1]
-    i_name = f"{uuid.uuid4()}{i_ext}"
-    with open(os.path.join(IMG_DIR, i_name), "wb") as b:
-        shutil.copyfileobj(imagem_capa.file, b)
-
+    # Criar o produto primeiro
     novo_produto = models.Produto(
-        titulo=titulo, preco=preco, descricao=descricao,
-        arquivo_url=f"uploads/arquivos/{f_name}",
-        imagem_url=f"uploads/imagens/{i_name}",
-        vendedor_email=current_user
+        titulo=titulo, 
+        preco=preco, 
+        descricao=descricao,
+        tipo=tipo_produto,
+        vendedor_email=current_user_email
     )
     db.add(novo_produto)
+    db.flush() # Flush para ter o ID do produto antes do commit
+
+    ordem_midia = 0
+    # Processar imagens
+    for imagem in imagens:
+        ext = os.path.splitext(imagem.filename)[1]
+        file_name = f"{uuid.uuid4()}{ext}"
+        file_path = os.path.join(IMG_DIR, file_name)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(imagem.file, buffer)
+        
+        db.add(models.MidiaProduto(
+            produto_id=novo_produto.id,
+            url=f"uploads/imagens/{file_name}",
+            tipo="imagem",
+            ordem=ordem_midia
+        ))
+        ordem_midia += 1
+
+    # Processar outros arquivos (vídeos, documentos, etc.)
+    for arquivo in arquivos:
+        ext = os.path.splitext(arquivo.filename)[1]
+        file_name = f"{uuid.uuid4()}{ext}"
+        file_path = os.path.join(FILES_DIR, file_name)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(arquivo.file, buffer)
+        
+        # Determinar o tipo do arquivo (simplificado, pode ser expandido com validação MIME)
+        media_tipo = "arquivo"
+        if ext.lower() in ['.mp4', '.mov', '.avi', '.mkv']:
+            media_tipo = "video"
+
+        db.add(models.MidiaProduto(
+            produto_id=novo_produto.id,
+            url=f"uploads/arquivos/{file_name}",
+            tipo=media_tipo,
+            ordem=ordem_midia
+        ))
+        ordem_midia += 1
+    
     db.commit()
-    return {"message": "Produto cadastrado com sucesso!"}
+    db.refresh(novo_produto)
+    
+    return {
+        "message": "Produto cadastrado com sucesso!",
+        "produto": schemas.ProdutoResponse.from_orm(novo_produto)
+    }
+
+
+# --- ROTAS DE BUSCA DE PRODUTOS ---
+@app.get("/api/produtos/buscar", response_model=List[schemas.ProdutoResponse])
+def buscar_produtos(
+    q: Optional[str] = None,
+    min_preco: Optional[float] = None,
+    max_preco: Optional[float] = None,
+    tipo: Optional[str] = None,
+    vendedor_email: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    query = db.query(models.Produto).options(joinedload(models.Produto.midias))
+
+    if q:
+        query = query.filter(
+            or_(
+                models.Produto.titulo.ilike(f"%{q}%"),
+                models.Produto.descricao.ilike(f"%{q}%")
+            )
+        )
+    if min_preco is not None:
+        query = query.filter(models.Produto.preco >= min_preco)
+    if max_preco is not None:
+        query = query.filter(models.Produto.preco <= max_preco)
+    if tipo:
+        query = query.filter(models.Produto.tipo == tipo)
+    if vendedor_email:
+        query = query.filter(models.Produto.vendedor_email == vendedor_email)
+    
+    produtos_com_midias = query.all()
+
+    produtos_para_resposta = []
+    for produto in produtos_com_midias:
+        produto_dict = produto.__dict__
+        
+        imagens = [m for m in produto.midias if m.tipo == 'imagem']
+        outras_midias = [m for m in produto.midias if m.tipo != 'imagem']
+        
+        # Prioriza a primeira imagem, se existir
+        midias_ordenadas = sorted(imagens, key=lambda m: m.ordem) + sorted(outras_midias, key=lambda m: m.ordem)
+        
+        # Atualiza a lista de midias no dicionário do produto
+        produto_dict['midias'] = midias_ordenadas
+        
+        produtos_para_resposta.append(schemas.ProdutoResponse.model_validate(produto_dict))
+    
+    return produtos_para_resposta
+
+@app.get("/api/produtos/{produto_id}", response_model=schemas.ProdutoResponse)
+def get_produto(produto_id: int, db: Session = Depends(get_db)):
+    produto = db.query(models.Produto)\
+                .options(joinedload(models.Produto.midias))\
+                .filter(models.Produto.id == produto_id)\
+                .first()
+    if not produto:
+        raise HTTPException(status_code=404, detail="Produto não encontrado.")
+    return produto
 
 @app.post("/api/produtos/comprar/{produto_id}")
 def comprar_produto(produto_id: int, db: Session = Depends(get_db), email: str = Depends(get_current_user)):
@@ -187,9 +291,85 @@ def comprar_produto(produto_id: int, db: Session = Depends(get_db), email: str =
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Erro no processamento: {str(e)}")
 
-@app.get("/api/meus-cursos")
+@app.get("/api/meus-cursos", response_model=List[schemas.ProdutoResponse])
 def listar_meus_cursos(db: Session = Depends(get_db), email: str = Depends(get_current_user)):
-    return db.query(models.Produto).join(models.Compra).filter(models.Compra.aluno_email == email).all()
+    produtos_comprados = db.query(models.Produto).options(joinedload(models.Produto.midias)).join(models.Compra).filter(models.Compra.aluno_email == email).all()
+
+    produtos_para_resposta = []
+    for produto in produtos_comprados:
+        produto_dict = produto.__dict__
+        arquivo_url = None
+        
+        # Tenta encontrar um arquivo ou vídeo entre as mídias do produto
+        for midia in produto.midias:
+            if midia.tipo == 'arquivo' or midia.tipo == 'video':
+                arquivo_url = midia.url
+                break # Pega o primeiro arquivo/video encontrado
+
+        produto_dict['arquivo_url'] = arquivo_url
+        produtos_para_resposta.append(schemas.ProdutoResponse.model_validate(produto_dict))
+    
+    return produtos_para_resposta
+
+# --- ROTAS DE AVALIAÇÕES ---
+@app.post("/api/avaliacoes", response_model=schemas.Avaliacao, status_code=status.HTTP_201_CREATED)
+def criar_avaliacao(
+    avaliacao_data: schemas.AvaliacaoCreate,
+    db: Session = Depends(get_db),
+    current_user_email: str = Depends(get_current_user)
+):
+    # 1. Obter o ID do aluno logado
+    aluno = db.query(models.Usuario).filter(models.Usuario.email == current_user_email).first()
+    if not aluno:
+        raise HTTPException(status_code=404, detail="Usuário aluno não encontrado.")
+
+    # 2. Verificar se o produto existe
+    produto = db.query(models.Produto).filter(models.Produto.id == avaliacao_data.produto_id).first()
+    if not produto:
+        raise HTTPException(status_code=404, detail="Produto não encontrado.")
+
+    # 3. Verificar se o aluno comprou o produto
+    compra_existente = db.query(models.Compra).filter(
+        models.Compra.aluno_email == current_user_email,
+        models.Compra.produto_id == avaliacao_data.produto_id
+    ).first()
+    if not compra_existente:
+        raise HTTPException(status_code=403, detail="Você só pode avaliar produtos que comprou.")
+
+    # 4. Verificar se o aluno já avaliou este produto
+    avaliacao_existente = db.query(models.Avaliacao).filter(
+        models.Avaliacao.aluno_id == aluno.id,
+        models.Avaliacao.produto_id == avaliacao_data.produto_id
+    ).first()
+    if avaliacao_existente:
+        raise HTTPException(status_code=400, detail="Você já enviou uma avaliação para este produto.")
+    
+    # 5. Criar a nova avaliação
+    nova_avaliacao = models.Avaliacao(
+        produto_id=avaliacao_data.produto_id,
+        aluno_id=aluno.id,
+        nota=avaliacao_data.nota,
+        comentario=avaliacao_data.comentario
+    )
+    db.add(nova_avaliacao)
+    db.commit()
+    db.refresh(nova_avaliacao)
+    
+    return nova_avaliacao
+
+@app.get("/api/produtos/{produto_id}/avaliacoes", response_model=List[schemas.Avaliacao])
+def listar_avaliacoes_produto(produto_id: int, db: Session = Depends(get_db)):
+    # 1. Verificar se o produto existe
+    produto = db.query(models.Produto).filter(models.Produto.id == produto_id).first()
+    if not produto:
+        raise HTTPException(status_code=404, detail="Produto não encontrado.")
+
+    # 2. Listar avaliações para o produto, carregando os dados do aluno
+    avaliacoes = db.query(models.Avaliacao)\
+                   .options(joinedload(models.Avaliacao.aluno))\
+                   .filter(models.Avaliacao.produto_id == produto_id)\
+                   .all()
+    return avaliacoes
 
 # --- ROTAS FINANCEIRAS E DASHBOARD ---
 

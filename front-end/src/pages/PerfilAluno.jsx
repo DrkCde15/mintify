@@ -5,19 +5,23 @@ import { BookOpen, User, Download, ExternalLink, PlayCircle } from 'lucide-react
 const API_BASE_URL = 'http://localhost:8000';
 
 export default function PerfilAluno() {
+  console.log('PerfilAluno component rendering...'); // Debug log
   const [usuario] = useState(JSON.parse(localStorage.getItem('usuario') || '{}'));
   const [meusProdutos, setMeusProdutos] = useState([]);
   const [carregando, setCarregando] = useState(true);
 
   useEffect(() => {
     const carregarMeusCursos = async () => {
+      console.log('Carregando meus cursos...'); // Debug log
       try {
         const res = await api.get('/api/meus-cursos');
+        console.log('Meus cursos carregados:', res.data); // Debug log
         setMeusProdutos(res.data);
       } catch (err) {
-        console.error("Erro ao carregar seus produtos:", err);
+        console.error("Erro ao carregar seus produtos:", err); // Debug log
       } finally {
         setCarregando(false);
+        console.log('Carregando cursos set to false.'); // Debug log
       }
     };
     carregarMeusCursos();
@@ -53,38 +57,47 @@ export default function PerfilAluno() {
       ) : (
         <div className="stats-grid">
           {meusProdutos.length > 0 ? (
-            meusProdutos.map(p => (
-              <div key={p.id} className="stat-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%' }}>
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
-                    <span className="hero-badge" style={{ fontSize: '0.65rem' }}>ADQUIRIDO</span>
-                    {getIcon(p.arquivo_url)}
+            meusProdutos.map(p => {
+              console.log('Rendering meuProduto:', p); // Debug log
+              return (
+                <div key={p.id} className="stat-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%' }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                      <span className="hero-badge" style={{ fontSize: '0.65rem' }}>ADQUIRIDO</span>
+                      {getIcon(p.arquivo_url)}
+                    </div>
+                    <h3 style={{ fontSize: '1.1rem', marginBottom: '0.5rem' }}>{p.titulo}</h3>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+                      {p.descricao || "Sem descrição disponível."}
+                    </p>
                   </div>
-                  <h3 style={{ fontSize: '1.1rem', marginBottom: '0.5rem' }}>{p.titulo}</h3>
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
-                    {p.descricao || "Sem descrição disponível."}
-                  </p>
-                </div>
 
-                <a 
-                  href={`${API_BASE_URL}/${p.arquivo_url}`} 
-                  target="_blank" 
-                  rel="noreferrer"
-                  className="btn-primary" 
-                  style={{ 
-                    width: '100%', 
-                    textDecoration: 'none', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center', 
-                    gap: '8px',
-                    fontSize: '0.9rem'
-                  }}
-                >
-                  <ExternalLink size={16} /> Acessar Conteúdo
-                </a>
-              </div>
-            ))
+                  {p.arquivo_url ? (
+                      <a 
+                        href={`${API_BASE_URL}/${p.arquivo_url}`} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="btn-primary" 
+                        style={{ 
+                          width: '100%', 
+                          textDecoration: 'none', 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          justifyContent: 'center', 
+                          gap: '8px',
+                          fontSize: '0.9rem'
+                        }}
+                      >
+                        <ExternalLink size={16} /> Acessar Conteúdo
+                      </a>
+                  ) : (
+                      <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', textAlign: 'center', padding: '10px 0' }}>
+                          Conteúdo indisponível.
+                      </p>
+                  )}
+                </div>
+              );
+            })
           ) : (
             <div className="card-white" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '4rem 2rem' }}>
               <div style={{ marginBottom: '1rem', color: 'var(--text-muted)' }}>

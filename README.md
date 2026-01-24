@@ -7,14 +7,18 @@ O **Mintify** é uma plataforma full-stack moderna para venda e gestão de produ
 ### Frontend
 
 * **React.js (Vite)**: Performance e agilidade no desenvolvimento.
+* **React Router DOM**: Gerenciamento de rotas e navegação na aplicação.
 * **Axios**: Cliente HTTP configurado com **Interceptors** para anexar automaticamente o Token JWT.
+* **Lucide React**: Biblioteca de ícones moderna e personalizável.
 * **Contexto de Autenticação**: Proteção de rotas privadas e persistência de sessão via `localStorage`.
 
 ### Backend
 
 * **FastAPI (Python)**: Framework de alto desempenho para APIs assíncronas.
+* **Pydantic**: Validação de dados e serialização/desserialização eficiente.
 * **JWT (JSON Web Token)**: Sistema de segurança para autenticação e autorização de usuários.
 * **SQLAlchemy & MySQL**: ORM robusto para persistência de dados relacionais.
+* **python-dotenv**: Gerenciamento de variáveis de ambiente.
 
 ---
 

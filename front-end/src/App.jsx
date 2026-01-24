@@ -10,17 +10,18 @@ import {
   BookOpen 
 } from 'lucide-react';
 import './App.css';
-import Home from './pages/Home';
 import Login from './pages/Login';
 import EscolhaPerfil from './pages/EscolhaPerfil';
+import Vitrine from './pages/Vitrine'; 
 import Cadastro from './pages/Cadastro';
 import Dashboard from './pages/Dashboard';
 import Produtos from './pages/Produtos';
 import Alunos from './pages/Alunos';
 import Financeiro from './pages/Financeiro';
 import Perfil from './pages/Perfil';
-import Marketplace from './pages/Marketplace';
 import PerfilAluno from './pages/PerfilAluno';
+import ProdutoDetalhe from './pages/ProdutoDetalhe'; // NOVO IMPORT
+import Header from './components/Header'; // RE-ADD THIS IMPORT
 
 // --- COMPONENTE DE PROTEÇÃO DE ROTA ---
 // Verifica se o usuário está logado e se tem permissão para a rota
@@ -35,7 +36,8 @@ const ProtectedRoute = ({ children, roleRequired }) => {
   
   // Bloqueia acesso se o perfil for diferente do exigido pela rota
   if (roleRequired && perfil !== roleRequired) {
-    return <Navigate to={perfil === 'vendedor' ? '/app' : '/app/marketplace'} replace />;
+    // Para alunos, redirecionar para a Vitrine se tentarem acessar rota de vendedor
+    return <Navigate to={perfil === 'vendedor' ? '/app' : '/'} replace />; 
   }
 
   return children;
@@ -61,8 +63,11 @@ function DashboardLayout({ children }) {
         <div className="logo">Mintify</div>
         <nav className="nav-links">
           {ehVendedor ? (
-            /* MENU DO VENDEDOR - Mantém o Perfil */
+            /* MENU DO VENDEDOR */
             <>
+              <Link to="/" className={`nav-item ${location.pathname === '/' ? 'active' : ''}`}> 
+                <Store size={20}/> Vitrine
+              </Link>
               <Link to="/app" className={`nav-item ${location.pathname === '/app' ? 'active' : ''}`}>
                 <LayoutDashboard size={20}/> Dashboard
               </Link>
@@ -75,16 +80,15 @@ function DashboardLayout({ children }) {
               <Link to="/app/financeiro" className={`nav-item ${location.pathname === '/app/financeiro' ? 'active' : ''}`}>
                 <DollarSign size={20}/> Financeiro
               </Link>
-              {/* O Perfil só aparece aqui para o vendedor */}
               <Link to="/app/perfil" className={`nav-item ${location.pathname === '/app/perfil' ? 'active' : ''}`}>
                 <User size={20}/> Perfil
               </Link>
             </>
           ) : (
-            /* MENU DO ALUNO - Perfil removido daqui */
+            /* MENU DO ALUNO */
             <>
-              <Link to="/app/marketplace" className={`nav-item ${location.pathname === '/app/marketplace' ? 'active' : ''}`}>
-                <Store size={20}/> Mercado
+              <Link to="/" className={`nav-item ${location.pathname === '/' ? 'active' : ''}`}> 
+                <Store size={20}/> Vitrine
               </Link>
               <Link to="/app/meus-cursos" className={`nav-item ${location.pathname === '/app/meus-cursos' ? 'active' : ''}`}>
                 <BookOpen size={20}/> Meus Cursos
@@ -110,17 +114,30 @@ function App() {
     const usuario = JSON.parse(localStorage.getItem('usuario') || '{}');
     const perfil = usuario.perfil || localStorage.getItem('perfil');
     
-    // Se for vendedor, renderiza Dashboard. Se for aluno, Marketplace.
-    return perfil === 'vendedor' ? <Dashboard /> : <Marketplace />;
+    // Se for vendedor, renderiza Dashboard. Se for aluno, redireciona para a Vitrine.
+    return perfil === 'vendedor' ? <Dashboard /> : <Navigate to="/" replace />;
   };
 
   return (
     <Router>
       <Routes>
-        {/* Rotas Públicas */}
-        <Route path="/" element={<Home />} />
+        <Route path="/" element={
+          // Se o usuário estiver logado, renderiza a Vitrine com o DashboardLayout (e sidebar)
+          // Caso contrário, renderiza a Vitrine como página pública (sem sidebar)
+          localStorage.getItem('access_token') ? (
+            <ProtectedRoute>
+              <DashboardLayout><Vitrine /></DashboardLayout>
+            </ProtectedRoute>
+          ) : (
+            <>
+              <Header />
+              <Vitrine />
+            </>
+          )
+        } />
         <Route path="/login" element={<Login />} />
         <Route path="/cadastro" element={<Cadastro />} />
+        <Route path="/produto/:id" element={<ProdutoDetalhe />} /> {/* NOVA ROTA PÚBLICA */}
         
         {/* Rota de Transição para Novos Usuários */}
         <Route path="/escolha-perfil" element={
@@ -144,7 +161,7 @@ function App() {
                 <Route path="perfil" element={<ProtectedRoute roleRequired="vendedor"><Perfil /></ProtectedRoute>} />
 
                 {/* Rotas acessíveis ao Aluno */}
-                <Route path="marketplace" element={<Marketplace />} />
+                {/* A rota "/app/marketplace" foi substituída pela rota "/" (Vitrine) */}
                 <Route path="meus-cursos" element={<PerfilAluno />} />
                 
               </Routes>
