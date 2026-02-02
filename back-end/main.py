@@ -1,19 +1,45 @@
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.staticfiles import StaticFiles
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy.orm import Session, joinedload 
-from typing import List, Optional # Adicionado Optional
+from typing import List, Optional
 from jose import JWTError, jwt
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import shutil
 import os
 import uuid
-from sqlalchemy import or_ # Adicionado para busca com OR
+from sqlalchemy import or_
 
 # Importações locais do seu projeto
 import models, schemas, security
 from database import engine, get_db
-from utils.email import enviar_notificacao_venda  
+from config import settings
+from middleware.error_handler import (
+    error_handler_middleware,
+    validation_exception_handler,
+    http_exception_handler
+)
+from utils.file_validator import validate_upload_file
+from utils.image_processor import compress_image
+from utils.validators import (
+    validar_preco,
+    validar_chave_pix,
+    validar_valor_saque,
+    validar_nota_avaliacao,
+    validar_comentario
+)
+
+try:
+    from utils.email import enviar_notificacao_venda
+    EMAIL_ENABLED = True
+except ImportError:
+    EMAIL_ENABLED = False
+    print("⚠️  Módulo de e-mail não disponível. Notificações desabilitadas.")
 
 # 1. Inicia as tabelas no Banco de Dados
 models.Base.metadata.create_all(bind=engine)
@@ -25,18 +51,38 @@ FILES_DIR = os.path.join(UPLOAD_DIR, "arquivos")
 os.makedirs(IMG_DIR, exist_ok=True)
 os.makedirs(FILES_DIR, exist_ok=True)
 
-app = FastAPI(title="Mintify API - Marketplace Edition")
+# 3. Criar aplicação FastAPI
+app = FastAPI(
+    title="Mintify API - Marketplace Edition",
+    version="2.0.0",
+    description="API segura para marketplace de infoprodutos"
+)
 
-# 3. Configuração de CORS
+# 4. Configurar Rate Limiting
+if settings.RATE_LIMIT_ENABLED:
+    limiter = Limiter(key_func=get_remote_address)
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    print("✅ Rate limiting ativado")
+else:
+    limiter = None
+    print("⚠️  Rate limiting desativado")
+
+# 5. Configurar Middleware de Erros
+app.middleware("http")(error_handler_middleware)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+
+# 6. Configuração de CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"], 
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Servir arquivos estáticos (Imagens e Produtos)
+# 7. Servir arquivos estáticos (Imagens e Produtos)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/usuarios/login")
@@ -44,13 +90,14 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/usuarios/login")
 # --- DEPENDÊNCIA DE AUTENTICAÇÃO ---
 
 def get_current_user(token: str = Depends(oauth2_scheme)):
+    """Valida token JWT e retorna o e-mail do usuário autenticado"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Sessão inválida. Faça login novamente.",
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, security.SECRET_KEY, algorithms=[security.ALGORITHM])
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         email: str = payload.get("sub")
         if email is None:
             raise credentials_exception
@@ -61,7 +108,9 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
 # --- ROTAS DE USUÁRIO E PERFIL ---
 
 @app.post("/api/usuarios/cadastro", status_code=status.HTTP_201_CREATED)
-def cadastrar_usuario(user: schemas.UsuarioCreate, db: Session = Depends(get_db)):
+@limiter.limit("5/minute") if limiter else lambda x: x
+async def cadastrar_usuario(request: Request, user: schemas.UsuarioCreate, db: Session = Depends(get_db)):
+    """Cadastra um novo usuário no sistema"""
     db_user = db.query(models.Usuario).filter(models.Usuario.email == user.email).first()
     if db_user:
         raise HTTPException(status_code=400, detail="Este e-mail já está cadastrado.")
@@ -76,7 +125,9 @@ def cadastrar_usuario(user: schemas.UsuarioCreate, db: Session = Depends(get_db)
     return {"message": "Conta criada com sucesso!"}
 
 @app.post("/api/usuarios/login", response_model=schemas.Token)
-def login(dados: schemas.LoginRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute") if limiter else lambda x: x
+async def login(request: Request, dados: schemas.LoginRequest, db: Session = Depends(get_db)):
+    """Autentica usuário e retorna token JWT"""
     user = db.query(models.Usuario).filter(models.Usuario.email == dados.email).first()
     
     if not user or not security.verificar_senha(dados.senha, user.senha):
@@ -95,7 +146,8 @@ def login(dados: schemas.LoginRequest, db: Session = Depends(get_db)):
     }
 
 @app.put("/api/usuarios/completar-perfil")
-def completar_perfil(dados: schemas.UsuarioUpdate, db: Session = Depends(get_db), email: str = Depends(get_current_user)):
+async def completar_perfil(dados: schemas.UsuarioUpdate, db: Session = Depends(get_db), email: str = Depends(get_current_user)):
+    """Completa o perfil do usuário com tipo e chave PIX"""
     user = db.query(models.Usuario).filter(models.Usuario.email == email).first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
@@ -105,6 +157,8 @@ def completar_perfil(dados: schemas.UsuarioUpdate, db: Session = Depends(get_db)
     if dados.tipo_produto_interesse is not None:
         user.tipo_produto_interesse = dados.tipo_produto_interesse
     if dados.chave_pix is not None:
+        # Validar formato da chave PIX
+        validar_chave_pix(dados.chave_pix)
         user.chave_pix = dados.chave_pix
     
     db.commit()
@@ -121,65 +175,158 @@ def completar_perfil(dados: schemas.UsuarioUpdate, db: Session = Depends(get_db)
 
 # --- ROTAS DE PRODUTOS E MARKETPLACE ---
 
-@app.get("/api/produtos", response_model=List[schemas.ProdutoResponse])
-def listar_produtos(db: Session = Depends(get_db)): # Removed email dependency for public access to products
-    return db.query(models.Produto).options(joinedload(models.Produto.midias)).all()
+@app.get("/api/produtos", response_model=schemas.PaginatedResponse[schemas.ProdutoResponse])
+def listar_produtos(
+    params: schemas.PaginatedParams = Depends(),
+    db: Session = Depends(get_db)
+): 
+    """Lista todos os produtos com paginação"""
+    query = db.query(models.Produto).options(joinedload(models.Produto.midias))
+    total = query.count()
+    
+    produtos = query.offset((params.page - 1) * params.per_page).limit(params.per_page).all()
+    total_pages = (total + params.per_page - 1) // params.per_page
+    
+    return {
+        "items": produtos,
+        "total": total,
+        "page": params.page,
+        "per_page": params.per_page,
+        "total_pages": total_pages
+    }
 
 @app.post("/api/produtos/upload", status_code=status.HTTP_201_CREATED)
+@limiter.limit("10/hour") if limiter else lambda x: x
 async def upload_produto(
+    request: Request,
     titulo: str = Form(...), 
     preco: float = Form(...), 
     descricao: str = Form(...),
-    tipo_produto: str = Form("Curso Online"), # Novo campo para tipo de produto
-    imagens: List[UploadFile] = File([]), # Lista de imagens
-    arquivos: List[UploadFile] = File([]), # Lista de outros arquivos (vídeos, documentos)
+    tipo_produto: str = Form("Curso Online"),
+    tipo_entrega: str = Form("digital"), # 'digital' ou 'fisico'
+    estoque: int = Form(0),
+    peso_kg: Optional[float] = Form(None),
+    largura_cm: Optional[float] = Form(None),
+    altura_cm: Optional[float] = Form(None),
+    comprimento_cm: Optional[float] = Form(None),
+    imagens: List[UploadFile] = File([]),
+    arquivos: List[UploadFile] = File([]),
     db: Session = Depends(get_db), 
     current_user_email: str = Depends(get_current_user)
 ):
-    if not imagens and not arquivos:
-        raise HTTPException(status_code=400, detail="Pelo menos uma imagem ou um arquivo deve ser enviado.")
-
-    # Criar o produto primeiro
+    """Upload de produto com validação de arquivos e preço"""
+    
+    # Validar que pelo menos um arquivo foi enviado (para digital é obrigatório, para físico imagem é obrigatória)
+    if tipo_entrega == "digital" and not arquivos:
+         raise HTTPException(status_code=400, detail="Produtos digitais devem conter pelo menos um arquivo.")
+    
+    if not imagens:
+        raise HTTPException(status_code=400, detail="Pelo menos uma imagem deve ser enviada.")
+    
+    # Validar preço
+    preco = validar_preco(preco)
+    
+    # Validar imagens (máximo 10)
+    if len(imagens) > 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Máximo de 10 imagens permitidas"
+        )
+    
+    # Validar arquivos (máximo 5)
+    if len(arquivos) > 5:
+        raise HTTPException(
+            status_code=400,
+            detail="Máximo de 5 arquivos permitidos"
+        )
+    
+    # Criar o produto
     novo_produto = models.Produto(
         titulo=titulo, 
         preco=preco, 
         descricao=descricao,
         tipo=tipo_produto,
+        tipo_entrega=tipo_entrega,
+        estoque=estoque,
+        peso_kg=peso_kg,
+        largura_cm=largura_cm,
+        altura_cm=altura_cm,
+        comprimento_cm=comprimento_cm,
         vendedor_email=current_user_email
     )
     db.add(novo_produto)
-    db.flush() # Flush para ter o ID do produto antes do commit
+    db.flush()  # Flush para ter o ID do produto antes do commit
 
     ordem_midia = 0
+    
     # Processar imagens
     for imagem in imagens:
-        ext = os.path.splitext(imagem.filename)[1]
-        file_name = f"{uuid.uuid4()}{ext}"
-        file_path = os.path.join(IMG_DIR, file_name)
-        with open(file_path, "wb") as buffer:
+        if not imagem.filename:
+            continue
+            
+        # Validar arquivo
+        file_info = await validate_upload_file(imagem, 'image')
+        
+        # Gerar nome único base
+        ext = os.path.splitext(file_info['safe_filename'])[1]
+        unique_name = str(uuid.uuid4())
+        temp_path = os.path.join(IMG_DIR, f"temp_{unique_name}{ext}")
+        final_file_path = os.path.join(IMG_DIR, f"{unique_name}{ext}")
+        
+        # Salvar arquivo original temporariamente
+        with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(imagem.file, buffer)
         
+        # Comprimir e converter para WebP
+        processed_path = compress_image(temp_path, final_file_path)
+        processed_file_name = os.path.basename(processed_path)
+        
+        # Remover temporário
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        
+        # Registrar no banco
         db.add(models.MidiaProduto(
             produto_id=novo_produto.id,
-            url=f"uploads/imagens/{file_name}",
+            url=f"uploads/imagens/{processed_file_name}",
             tipo="imagem",
             ordem=ordem_midia
         ))
         ordem_midia += 1
 
-    # Processar outros arquivos (vídeos, documentos, etc.)
+    # Processar outros arquivos (vídeos, documentos)
     for arquivo in arquivos:
-        ext = os.path.splitext(arquivo.filename)[1]
+        if not arquivo.filename:
+            continue
+        
+        # Determinar tipo do arquivo
+        ext = os.path.splitext(arquivo.filename)[1].lower()
+        
+        if ext in ['.mp4', '.mov', '.avi', '.mkv']:
+            file_type = 'video'
+            media_tipo = 'video'
+        elif ext in ['.pdf', '.zip']:
+            file_type = 'document'
+            media_tipo = 'arquivo'
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Tipo de arquivo não suportado: {ext}"
+            )
+        
+        # Validar arquivo
+        file_info = await validate_upload_file(arquivo, file_type)
+        
+        # Gerar nome único
+        ext = os.path.splitext(file_info['safe_filename'])[1]
         file_name = f"{uuid.uuid4()}{ext}"
         file_path = os.path.join(FILES_DIR, file_name)
+        
+        # Salvar arquivo
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(arquivo.file, buffer)
         
-        # Determinar o tipo do arquivo (simplificado, pode ser expandido com validação MIME)
-        media_tipo = "arquivo"
-        if ext.lower() in ['.mp4', '.mov', '.avi', '.mkv']:
-            media_tipo = "video"
-
+        # Registrar no banco
         db.add(models.MidiaProduto(
             produto_id=novo_produto.id,
             url=f"uploads/arquivos/{file_name}",
@@ -198,15 +345,17 @@ async def upload_produto(
 
 
 # --- ROTAS DE BUSCA DE PRODUTOS ---
-@app.get("/api/produtos/buscar", response_model=List[schemas.ProdutoResponse])
+@app.get("/api/produtos/buscar", response_model=schemas.PaginatedResponse[schemas.ProdutoResponse])
 def buscar_produtos(
     q: Optional[str] = None,
     min_preco: Optional[float] = None,
     max_preco: Optional[float] = None,
     tipo: Optional[str] = None,
     vendedor_email: Optional[str] = None,
+    params: schemas.PaginatedParams = Depends(),
     db: Session = Depends(get_db)
 ):
+    """Busca produtos com filtros e paginação"""
     query = db.query(models.Produto).options(joinedload(models.Produto.midias))
 
     if q:
@@ -225,7 +374,8 @@ def buscar_produtos(
     if vendedor_email:
         query = query.filter(models.Produto.vendedor_email == vendedor_email)
     
-    produtos_com_midias = query.all()
+    total = query.count()
+    produtos_com_midias = query.offset((params.page - 1) * params.per_page).limit(params.per_page).all()
 
     produtos_para_resposta = []
     for produto in produtos_com_midias:
@@ -242,7 +392,15 @@ def buscar_produtos(
         
         produtos_para_resposta.append(schemas.ProdutoResponse.model_validate(produto_dict))
     
-    return produtos_para_resposta
+    total_pages = (total + params.per_page - 1) // params.per_page
+    
+    return {
+        "items": produtos_para_resposta,
+        "total": total,
+        "page": params.page,
+        "per_page": params.per_page,
+        "total_pages": total_pages
+    }
 
 @app.get("/api/produtos/{produto_id}", response_model=schemas.ProdutoResponse)
 def get_produto(produto_id: int, db: Session = Depends(get_db)):
@@ -255,18 +413,60 @@ def get_produto(produto_id: int, db: Session = Depends(get_db)):
     return produto
 
 @app.post("/api/produtos/comprar/{produto_id}")
-def comprar_produto(produto_id: int, db: Session = Depends(get_db), email: str = Depends(get_current_user)):
+@limiter.limit("20/hour") if limiter else lambda x: x
+async def comprar_produto(
+    request: Request, 
+    produto_id: int, 
+    compra_data: schemas.CompraRequest,
+    db: Session = Depends(get_db), 
+    email: str = Depends(get_current_user)
+):
+    """Realiza a compra de um produto (Digital ou Físico)"""
     prod = db.query(models.Produto).filter(models.Produto.id == produto_id).first()
     if not prod:
         raise HTTPException(status_code=404, detail="Produto não encontrado")
 
-    ja_possui = db.query(models.Compra).filter(models.Compra.aluno_email == email, models.Compra.produto_id == produto_id).first()
-    if ja_possui:
-        raise HTTPException(status_code=400, detail="Você já possui este curso")
+    # Verifica se é digital e se o aluno já possui
+    if prod.tipo_entrega == "digital":
+        ja_possui = db.query(models.Compra).filter(
+            models.Compra.aluno_email == email, 
+            models.Compra.produto_id == produto_id
+        ).first()
+        if ja_possui:
+            raise HTTPException(status_code=400, detail="Você já possui este curso/arquivo.")
+    
+    # Se for físico, validar estoque e endereço
+    if prod.tipo_entrega == "fisico":
+        if prod.estoque <= 0:
+            raise HTTPException(status_code=400, detail="Produto fora de estoque.")
+        
+        if not compra_data.endereco:
+            raise HTTPException(status_code=400, detail="Endereço de entrega é obrigatório para produtos físicos.")
 
     try:
-        # 1. Registra a compra para o Aluno
-        db.add(models.Compra(aluno_email=email, produto_id=produto_id, valor_pago=prod.preco))
+        # Dados da Compra
+        nova_compra = models.Compra(
+            aluno_email=email, 
+            produto_id=produto_id, 
+            valor_pago=prod.preco,
+            tipo_entrega_momento=prod.tipo_entrega
+        )
+        
+        # Se físico, preencher endereço e status logístico
+        if prod.tipo_entrega == "fisico":
+            nova_compra.status_logistica = "pendente_envio"
+            nova_compra.cep = compra_data.endereco.cep
+            nova_compra.logradouro = compra_data.endereco.logradouro
+            nova_compra.numero = compra_data.endereco.numero
+            nova_compra.complemento = compra_data.endereco.complemento
+            nova_compra.bairro = compra_data.endereco.bairro
+            nova_compra.cidade = compra_data.endereco.cidade
+            nova_compra.estado = compra_data.endereco.estado
+            
+            # Decrementar estoque
+            prod.estoque -= 1
+
+        db.add(nova_compra)
         
         # 2. Gera crédito financeiro para o Vendedor
         db.add(models.Movimentacao(vendedor_email=prod.vendedor_email, valor=prod.preco, tipo='venda'))
@@ -274,50 +474,63 @@ def comprar_produto(produto_id: int, db: Session = Depends(get_db), email: str =
         # 3. Atualiza contador de vendas
         prod.vendas_count += 1
         
-        # Salva tudo no banco antes de enviar o e-mail
         db.commit()
 
         # 4. GATILHO DE E-MAIL (RESEND)
-        # Enviamos a notificação para o vendedor_email que está no produto
-        enviar_notificacao_venda(
-            email_vendedor=prod.vendedor_email,
-            nome_produto=prod.titulo,
-            valor=prod.preco
-        )
+        if EMAIL_ENABLED:
+            try:
+                enviar_notificacao_venda(
+                    email_vendedor=prod.vendedor_email,
+                    nome_produto=prod.titulo,
+                    valor=prod.preco
+                )
+            except Exception as e:
+                print(f"⚠️  Erro ao enviar e-mail: {e}")
 
-        return {"message": "Compra realizada com sucesso e vendedor notificado!"}
+        return {"message": "Compra realizada com sucesso!", "tipo": prod.tipo_entrega}
 
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Erro no processamento: {str(e)}")
 
-@app.get("/api/meus-cursos", response_model=List[schemas.ProdutoResponse])
-def listar_meus_cursos(db: Session = Depends(get_db), email: str = Depends(get_current_user)):
-    produtos_comprados = db.query(models.Produto).options(joinedload(models.Produto.midias)).join(models.Compra).filter(models.Compra.aluno_email == email).all()
-
-    produtos_para_resposta = []
-    for produto in produtos_comprados:
-        produto_dict = produto.__dict__
-        arquivo_url = None
-        
-        # Tenta encontrar um arquivo ou vídeo entre as mídias do produto
-        for midia in produto.midias:
-            if midia.tipo == 'arquivo' or midia.tipo == 'video':
-                arquivo_url = midia.url
-                break # Pega o primeiro arquivo/video encontrado
-
-        produto_dict['arquivo_url'] = arquivo_url
-        produtos_para_resposta.append(schemas.ProdutoResponse.model_validate(produto_dict))
+@app.get("/api/meus-cursos", response_model=schemas.PaginatedResponse[schemas.CompraComProduto])
+def listar_meus_cursos(
+    params: schemas.PaginatedParams = Depends(),
+    db: Session = Depends(get_db), 
+    email: str = Depends(get_current_user)
+):
+    """Lista as compras realizadas pelo aluno (Digital ou Físico)"""
+    query = db.query(models.Compra)\
+              .options(joinedload(models.Compra.produto).joinedload(models.Produto.midias))\
+              .filter(models.Compra.aluno_email == email)\
+              .order_by(models.Compra.data_compra.desc())
     
-    return produtos_para_resposta
+    total = query.count()
+    compras = query.offset((params.page - 1) * params.per_page).limit(params.per_page).all()
+    
+    total_pages = (total + params.per_page - 1) // params.per_page
+
+    return {
+        "items": compras,
+        "total": total,
+        "page": params.page,
+        "per_page": params.per_page,
+        "total_pages": total_pages
+    }
 
 # --- ROTAS DE AVALIAÇÕES ---
 @app.post("/api/avaliacoes", response_model=schemas.Avaliacao, status_code=status.HTTP_201_CREATED)
-def criar_avaliacao(
+async def criar_avaliacao(
     avaliacao_data: schemas.AvaliacaoCreate,
     db: Session = Depends(get_db),
     current_user_email: str = Depends(get_current_user)
 ):
+    """Cria uma nova avaliação para um produto"""
+    
+    # Validar nota e comentário
+    nota = validar_nota_avaliacao(avaliacao_data.nota)
+    comentario = validar_comentario(avaliacao_data.comentario)
+    
     # 1. Obter o ID do aluno logado
     aluno = db.query(models.Usuario).filter(models.Usuario.email == current_user_email).first()
     if not aluno:
@@ -348,8 +561,8 @@ def criar_avaliacao(
     nova_avaliacao = models.Avaliacao(
         produto_id=avaliacao_data.produto_id,
         aluno_id=aluno.id,
-        nota=avaliacao_data.nota,
-        comentario=avaliacao_data.comentario
+        nota=nota,
+        comentario=comentario
     )
     db.add(nova_avaliacao)
     db.commit()
@@ -357,19 +570,38 @@ def criar_avaliacao(
     
     return nova_avaliacao
 
-@app.get("/api/produtos/{produto_id}/avaliacoes", response_model=List[schemas.Avaliacao])
-def listar_avaliacoes_produto(produto_id: int, db: Session = Depends(get_db)):
+@app.get("/api/produtos/{produto_id}/avaliacoes", response_model=schemas.PaginatedResponse[schemas.Avaliacao])
+def listar_avaliacoes_produto(
+    produto_id: int, 
+    params: schemas.PaginatedParams = Depends(),
+    db: Session = Depends(get_db)
+):
+    """Lista as avaliações de um produto com paginação"""
     # 1. Verificar se o produto existe
     produto = db.query(models.Produto).filter(models.Produto.id == produto_id).first()
     if not produto:
         raise HTTPException(status_code=404, detail="Produto não encontrado.")
 
     # 2. Listar avaliações para o produto, carregando os dados do aluno
-    avaliacoes = db.query(models.Avaliacao)\
-                   .options(joinedload(models.Avaliacao.aluno))\
-                   .filter(models.Avaliacao.produto_id == produto_id)\
-                   .all()
-    return avaliacoes
+    query = db.query(models.Avaliacao)\
+              .options(joinedload(models.Avaliacao.aluno))\
+              .filter(models.Avaliacao.produto_id == produto_id)
+    
+    total = query.count()
+    avaliacoes = query.order_by(models.Avaliacao.data_avaliacao.desc())\
+                      .offset((params.page - 1) * params.per_page)\
+                      .limit(params.per_page)\
+                      .all()
+    
+    total_pages = (total + params.per_page - 1) // params.per_page
+    
+    return {
+        "items": avaliacoes,
+        "total": total,
+        "page": params.page,
+        "per_page": params.per_page,
+        "total_pages": total_pages
+    }
 
 # --- ROTAS FINANCEIRAS E DASHBOARD ---
 
@@ -405,26 +637,119 @@ def get_financeiro(db: Session = Depends(get_db), email: str = Depends(get_curre
     }
 
 @app.post("/api/financeiro/saque")
-def solicitar_saque(dados: dict, db: Session = Depends(get_db), email: str = Depends(get_current_user)):
+async def solicitar_saque(dados: dict, db: Session = Depends(get_db), email: str = Depends(get_current_user)):
+    """Solicita um saque do saldo disponível"""
     valor = float(dados.get("valor", 0))
+    chave_pix = dados.get("chave_pix", "")
+    
+    # Calcular saldo disponível
     movs = db.query(models.Movimentacao).filter(models.Movimentacao.vendedor_email == email).all()
     disponivel = sum(m.valor for m in movs if m.tipo == 'venda') - sum(m.valor for m in movs if m.tipo == 'saque')
     
-    if valor > disponivel:
-        raise HTTPException(status_code=400, detail="Saldo insuficiente para este saque.")
+    # Validar valor do saque
+    valor = validar_valor_saque(valor, disponivel)
+    
+    # Validar chave PIX
+    if chave_pix:
+        validar_chave_pix(chave_pix)
+    else:
+        # Buscar chave PIX do perfil do usuário
+        user = db.query(models.Usuario).filter(models.Usuario.email == email).first()
+        if user and user.chave_pix:
+            chave_pix = user.chave_pix
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Chave PIX não informada. Atualize seu perfil ou informe a chave."
+            )
 
     db.add(models.Movimentacao(
         vendedor_email=email, 
         valor=valor, 
         tipo='saque', 
         status='pendente', 
-        chave_pix=dados.get("chave_pix")
+        chave_pix=chave_pix
     ))
     db.commit()
-    return {"message": "Solicitação de saque enviada!"}
+    return {
+        "message": "Solicitação de saque enviada com sucesso!",
+        "valor": valor,
+        "chave_pix": chave_pix
+    }
 
-@app.get("/api/alunos")
-def listar_alunos_vendedor(db: Session = Depends(get_db), email: str = Depends(get_current_user)):
-    return db.query(models.Usuario).join(models.Compra, models.Usuario.email == models.Compra.aluno_email)\
-             .join(models.Produto, models.Compra.produto_id == models.Produto.id)\
-             .filter(models.Produto.vendedor_email == email).all()
+@app.get("/api/alunos", response_model=schemas.PaginatedResponse[schemas.UsuarioSimples])
+def listar_alunos_vendedor(
+    params: schemas.PaginatedParams = Depends(),
+    db: Session = Depends(get_db), 
+    email: str = Depends(get_current_user)
+):
+    """Lista os alunos que compraram produtos do vendedor com paginação"""
+    query = db.query(models.Usuario)\
+              .join(models.Compra, models.Usuario.email == models.Compra.aluno_email)\
+              .join(models.Produto, models.Compra.produto_id == models.Produto.id)\
+              .filter(models.Produto.vendedor_email == email)\
+              .distinct()
+    
+    total = query.count()
+    alunos = query.offset((params.page - 1) * params.per_page).limit(params.per_page).all()
+    total_pages = (total + params.per_page - 1) // params.per_page
+    
+    return {
+        "items": alunos,
+        "total": total,
+        "page": params.page,
+        "per_page": params.per_page,
+        "total_pages": total_pages
+    }
+
+# --- ROTAS DE LOGÍSTICA E VENDAS (VENDEDOR) ---
+
+@app.get("/api/vendedor/vendas", response_model=schemas.PaginatedResponse[schemas.CompraComProduto])
+def listar_vendas_vendedor(
+    params: schemas.PaginatedParams = Depends(),
+    db: Session = Depends(get_db),
+    email: str = Depends(get_current_user)
+):
+    """Lista todas as vendas realizadas pelo vendedor"""
+    query = db.query(models.Compra)\
+              .join(models.Produto)\
+              .options(joinedload(models.Compra.produto).joinedload(models.Produto.midias))\
+              .filter(models.Produto.vendedor_email == email)\
+              .order_by(models.Compra.data_compra.desc())
+              
+    total = query.count()
+    vendas = query.offset((params.page - 1) * params.per_page).limit(params.per_page).all()
+    total_pages = (total + params.per_page - 1) // params.per_page
+    
+    return {
+        "items": vendas,
+        "total": total,
+        "page": params.page,
+        "per_page": params.per_page,
+        "total_pages": total_pages
+    }
+
+@app.patch("/api/vendedor/vendas/{compra_id}")
+async def atualizar_logistica_venda(
+    compra_id: int,
+    status_logistica: Optional[str] = Form(None),
+    codigo_rastreio: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    email: str = Depends(get_current_user)
+):
+    """Atualiza o status de entrega e código de rastreio de uma venda"""
+    venda = db.query(models.Compra)\
+              .join(models.Produto)\
+              .filter(models.Compra.id == compra_id, models.Produto.vendedor_email == email)\
+              .first()
+              
+    if not venda:
+        raise HTTPException(status_code=404, detail="Venda não encontrada ou você não tem permissão.")
+    
+    if status_logistica:
+        venda.status_logistica = status_logistica
+    if codigo_rastreio:
+        venda.codigo_rastreio = codigo_rastreio
+        
+    db.commit()
+    return {"message": "Logística atualizada com sucesso!"}

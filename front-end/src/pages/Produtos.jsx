@@ -15,6 +15,9 @@ export default function Produtos() {
   const [imagens, setImagens] = useState([]);
   const [arquivos, setArquivos] = useState([]); // Pode incluir PDFs, vídeos, etc.
   const [tipoProduto, setTipoProduto] = useState('Curso Online'); // Novo estado
+  const [tipoEntrega, setTipoEntrega] = useState('digital'); // 'digital' ou 'fisico'
+  const [estoque, setEstoque] = useState(0);
+  const [dimensoes, setDimensoes] = useState({ peso: '', largura: '', altura: '', comprimento: '' });
 
   useEffect(() => {
     fetchProdutos();
@@ -24,7 +27,9 @@ export default function Produtos() {
     try {
       // Endpoint de produtos agora retorna com mídias
       const response = await api.get('/api/produtos');
-      setProdutos(response.data);
+      // Tratar se vier objeto paginado ou array
+      const data = response.data.items || response.data;
+      setProdutos(data);
     } catch (error) {
       console.error("Erro ao carregar produtos:", error);
     } finally {
@@ -43,8 +48,7 @@ export default function Produtos() {
   const handleUpload = async (e) => {
     e.preventDefault();
     if (imagens.length === 0) return alert("Selecione pelo menos uma imagem para a vitrine.");
-    // Conteúdo do produto pode ser opcional se for um produto físico sem arquivos digitais
-    // if (arquivos.length === 0) return alert("Selecione pelo menos um arquivo de conteúdo para o produto.");
+    if (tipoEntrega === 'digital' && arquivos.length === 0) return alert("Produtos digitais precisam de pelo menos um arquivo.");
 
     setEnviando(true);
     
@@ -53,6 +57,15 @@ export default function Produtos() {
     formData.append('preco', form.preco);
     formData.append('descricao', form.descricao);
     formData.append('tipo_produto', tipoProduto); // Adicionado o tipo de produto
+    formData.append('tipo_entrega', tipoEntrega);
+    
+    if (tipoEntrega === 'fisico') {
+        formData.append('estoque', estoque);
+        formData.append('peso_kg', dimensoes.peso);
+        formData.append('largura_cm', dimensoes.largura);
+        formData.append('altura_cm', dimensoes.altura);
+        formData.append('comprimento_cm', dimensoes.comprimento);
+    }
 
     imagens.forEach((file) => {
       formData.append('imagens', file);
@@ -72,7 +85,7 @@ export default function Produtos() {
       fetchProdutos();
     } catch (error) {
       console.error("Erro ao carregar produto:", error.response?.data?.detail || error.message);
-      alert("Erro ao cadastrar produto. Verifique o console para mais detalhes.");
+      alert("Erro ao cadastrar produto: " + (error.response?.data?.detail || "Verifique os dados."));
     } finally {
       setEnviando(false);
     }
@@ -84,6 +97,9 @@ export default function Produtos() {
     setImagens([]);
     setArquivos([]);
     setTipoProduto('Curso Online');
+    setTipoEntrega('digital');
+    setEstoque(0);
+    setDimensoes({ peso: '', largura: '', altura: '', comprimento: '' });
   };
 
   // Helper para exibir nomes dos arquivos selecionados
@@ -105,26 +121,24 @@ export default function Produtos() {
               <tr>
                 <th>Produto</th>
                 <th>Preço</th>
-                <th>Tipo</th> {/* Nova coluna */}
+                <th>Entrega</th>
+                <th>Estoque</th>
                 <th>Vendas</th>
-                <th>Mídias</th> {/* Nova coluna */}
               </tr>
             </thead>
             <tbody>
               {produtos.map(p => (
                 <tr key={p.id}>
                   <td style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
-                    {p.midias && p.midias.length > 0 && p.midias[0].tipo === 'imagem' && p.midias[0].url ? (
+                    {p.midias && p.midias.length > 0 && (
                         <img src={`http://localhost:8000/${p.midias[0].url}`} alt={p.titulo} style={{width: '40px', height: '40px', objectFit: 'cover', borderRadius: '4px'}} />
-                    ) : (
-                        <FileText size={20} color="var(--text-muted)" />
                     )}
                     <strong>{p.titulo}</strong>
                   </td>
                   <td>R$ {parseFloat(p.preco).toFixed(2)}</td>
-                  <td>{p.tipo}</td> {/* Exibir tipo */}
+                  <td style={{textTransform: 'capitalize'}}>{p.tipo_entrega}</td>
+                  <td>{p.tipo_entrega === 'fisico' ? p.estoque : '∞'}</td>
                   <td>{p.vendas_count || 0}</td>
-                  <td>{p.midias ? p.midias.length : 0}</td> {/* Exibir count de mídias */}
                 </tr>
               ))}
             </tbody>
@@ -134,72 +148,127 @@ export default function Produtos() {
 
       {modalAberto && (
         <div className="modal-overlay">
-          <div className="modal-content fade-in" style={{maxHeight: '90vh', overflowY: 'auto'}}>
+          <div className="modal-content fade-in" style={{maxWidth: '650px', maxHeight: '90vh', overflowY: 'auto'}}>
             <div className="modal-header">
               <h3>Cadastrar Novo Produto</h3>
-              <button onClick={fecharModal}><X size={20} /></button>
+              <button onClick={fecharModal} className="btn-close-modal"><X size={20} /></button>
             </div>
 
             <form onSubmit={handleUpload} className="auth-form">
-              <div className="form-group">
-                <label>Título do Produto</label>
-                <input type="text" required placeholder="Ex: Curso de Python Master" value={form.titulo} onChange={e => setForm({ ...form, titulo: e.target.value })} />
-              </div>
-              <div className="form-group">
-                <label>Preço de Venda (R$)</label>
-                <input type="number" step="0.01" required placeholder="0,00" value={form.preco} onChange={e => setForm({ ...form, preco: e.target.value })} />
-              </div>
-              <div className="form-group">
-                <label>Descrição Curta</label>
-                <textarea rows="2" required placeholder="Explique brevemente o que é o produto" value={form.descricao} onChange={e => setForm({ ...form, descricao: e.target.value })} 
-                  style={{ width: '100%', padding: '0.8rem', border: '1px solid var(--border)', borderRadius: '8px' }} />
-              </div>
-              <div className="form-group">
-                <label>Tipo de Produto</label>
-                <select value={tipoProduto} onChange={e => setTipoProduto(e.target.value)}>
-                    <option value="Curso Online">Curso Online</option>
-                    <option value="E-book">E-book</option>
-                    <option value="Software">Software</option>
-                    <option value="Serviço">Serviço</option>
-                    <option value="Outro">Outro</option>
-                </select>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div className="form-group">
+                    <label>Título do Produto</label>
+                    <input type="text" required placeholder="Ex: Suplemento Whey" value={form.titulo} onChange={e => setForm({ ...form, titulo: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label>Preço de Venda (R$)</label>
+                    <input type="number" step="0.01" required placeholder="0,00" value={form.preco} onChange={e => setForm({ ...form, preco: e.target.value })} />
+                  </div>
               </div>
 
-              {/* UPLOAD DE IMAGENS */}
-              <p style={{fontWeight: 600, marginBottom: '0.5rem', marginTop: '1.5rem'}}>1. Imagens da Vitrine (JPG/PNG)</p>
+              <div className="form-group">
+                <label>Descrição</label>
+                <textarea rows="2" required placeholder="Explique os benefícios deste produto" value={form.descricao} onChange={e => setForm({ ...form, descricao: e.target.value })} 
+                  style={{ width: '100%', padding: '0.8rem', border: '1px solid var(--border)', borderRadius: '8px' }} />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
+                  <div className="form-group">
+                    <label>Categoria</label>
+                    <select value={tipoProduto} onChange={e => setTipoProduto(e.target.value)}>
+                        <option value="Suplemento">Suplemento</option>
+                        <option value="Curso Online">Curso Online</option>
+                        <option value="E-book">E-book</option>
+                        <option value="Equipamento">Equipamento</option>
+                        <option value="Vestuário">Vestuário</option>
+                        <option value="Outro">Outro</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Tipo de Entrega</label>
+                    <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+                        <button type="button" 
+                          onClick={() => setTipoEntrega('digital')}
+                          className={`btn-toggle ${tipoEntrega === 'digital' ? 'active' : ''}`}
+                          style={{flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid var(--border)', cursor: 'pointer', background: tipoEntrega === 'digital' ? 'var(--primary-light)' : 'white'}}
+                        >Digital</button>
+                        <button type="button" 
+                          onClick={() => setTipoEntrega('fisico')}
+                          className={`btn-toggle ${tipoEntrega === 'fisico' ? 'active' : ''}`}
+                          style={{flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid var(--border)', cursor: 'pointer', background: tipoEntrega === 'fisico' ? 'var(--primary-light)' : 'white'}}
+                        >Físico</button>
+                    </div>
+                  </div>
+              </div>
+
+              {tipoEntrega === 'fisico' && (
+                  <div className="fade-in" style={{ background: '#f8fafc', padding: '1.5rem', borderRadius: '12px', border: '1px solid var(--border)', marginBottom: '1.5rem' }}>
+                      <p style={{ fontWeight: 700, marginTop: 0, marginBottom: '1rem', size: '0.9rem' }}>Logística e Estoque</p>
+                      <div className="form-group">
+                        <label>Estoque Disponível</label>
+                        <input type="number" required value={estoque} onChange={e => setEstoque(parseInt(e.target.value))} />
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                          <div className="form-group">
+                              <label>Peso (kg)</label>
+                              <input type="number" step="0.01" value={dimensoes.peso} onChange={e => setDimensoes({...dimensoes, peso: e.target.value})} />
+                          </div>
+                          <div className="form-group">
+                              <label>Largura (cm)</label>
+                              <input type="number" value={dimensoes.largura} onChange={e => setDimensoes({...dimensoes, largura: e.target.value})} />
+                          </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                          <div className="form-group">
+                              <label>Altura (cm)</label>
+                              <input type="number" value={dimensoes.altura} onChange={e => setDimensoes({...dimensoes, altura: e.target.value})} />
+                          </div>
+                          <div className="form-group">
+                              <label>Comprimento (cm)</label>
+                              <input type="number" value={dimensoes.comprimento} onChange={e => setDimensoes({...dimensoes, comprimento: e.target.value})} />
+                          </div>
+                      </div>
+                  </div>
+              )}
+
+              {/* IMAGENS SEMPRE OBRIGATÓRIAS */}
+              <p style={{fontWeight: 600, marginBottom: '0.5rem'}}>1. Imagens do Produto (Mínimo 1)</p>
               <div className="file-upload-box" style={{margin: '0.5rem 0 1.5rem 0'}}>
                 <input type="file" id="images-input" multiple onChange={handleImageChange} style={{ display: 'none' }} accept="image/*"/>
                 <label htmlFor="images-input" className="file-label">
                   {imagens.length > 0 ? (
                     <><ImageIcon size={20} color="#10b981" /> {getFileNames(imagens)}</>
                   ) : (
-                    <><ImageIcon size={20} /> Selecionar Imagens (múltiplas)</>
+                    <><ImageIcon size={20} /> Selecionar Fotos</>
                   )}
                 </label>
               </div>
 
-              {/* UPLOAD DE ARQUIVOS (CONTEÚDO DO PRODUTO) */}
-              <p style={{fontWeight: 600, marginBottom: '0.5rem'}}>2. Conteúdo do Produto (Opcional, todos os formatos)</p>
-              <div className="file-upload-box" style={{marginTop: '0.5rem'}}>
-                <input 
-                  type="file" 
-                  id="files-input" 
-                  multiple
-                  onChange={handleFileChange} 
-                  style={{ display: 'none' }} 
-                  accept=".doc,.docx,.pdf,.zip,.mp3,.mp4,audio/*,video/*"
-                />
-                <label htmlFor="files-input" className="file-label">
-                  {arquivos.length > 0 ? (
-                    <><Upload size={20} color="#10b981" /> {getFileNames(arquivos)}</>
-                  ) : (
-                    <><Upload size={20} /> Selecionar arquivos (múltiplos: Doc, PDF, Zip, MP3, MP4)</>
-                  )}
-                </label>
-              </div>
+              {tipoEntrega === 'digital' && (
+                  <>
+                    <p style={{fontWeight: 600, marginBottom: '0.5rem'}}>2. Arquivos de Conteúdo (Digital)</p>
+                    <div className="file-upload-box" style={{marginTop: '0.5rem'}}>
+                      <input 
+                        type="file" 
+                        id="files-input" 
+                        multiple
+                        onChange={handleFileChange} 
+                        style={{ display: 'none' }} 
+                        accept=".doc,.docx,.pdf,.zip,.mp3,.mp4,audio/*,video/*"
+                      />
+                      <label htmlFor="files-input" className="file-label">
+                        {arquivos.length > 0 ? (
+                          <><Upload size={20} color="#10b981" /> {getFileNames(arquivos)}</>
+                        ) : (
+                          <><Upload size={20} /> Selecionar arquivos (Docs, PDFs, Zips, Vídeos)</>
+                        )}
+                      </label>
+                    </div>
+                  </>
+              )}
 
-              <button type="submit" className="btn-primary w-full" disabled={enviando} style={{marginTop: '1.5rem'}}>
-                {enviando ? <Loader2 className="animate-spin" /> : "Criar e Publicar Produto"}
+              <button type="submit" className="btn-primary w-full" disabled={enviando} style={{marginTop: '2rem', height: '50px'}}>
+                {enviando ? <Loader2 className="animate-spin mx-auto" /> : "Publicar Produto"}
               </button>
             </form>
           </div>

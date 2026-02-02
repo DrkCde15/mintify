@@ -20,11 +20,20 @@ class Produto(Base):
     id = Column(Integer, primary_key=True, index=True)
     titulo = Column(String(150), nullable=False)
     descricao = Column(String(500), nullable=True)
-    tipo = Column(String(50), default="Curso Online") 
+    tipo = Column(String(50), default="Curso Online") # Ex: 'Curso', 'Ebook', 'Suplemento'
+    tipo_entrega = Column(String(20), default="digital", index=True) # 'digital' ou 'fisico'
     preco = Column(Float, nullable=False)
-    vendedor_email = Column(String(100), nullable=False)
-    status = Column(String(20), default="Ativo")   
+    vendedor_email = Column(String(100), nullable=False, index=True)
+    status = Column(String(20), default="Ativo", index=True)   
     vendas_count = Column(Integer, default=0)
+    
+    # Novos campos para produtos físicos
+    estoque = Column(Integer, default=0)
+    peso_kg = Column(Float, nullable=True)
+    largura_cm = Column(Float, nullable=True)
+    altura_cm = Column(Float, nullable=True)
+    comprimento_cm = Column(Float, nullable=True)
+    
     criado_em = Column(DateTime(timezone=True), server_default=func.now())
     avaliacoes = relationship("Avaliacao", back_populates="produto")
     midias = relationship("MidiaProduto", back_populates="produto", cascade="all, delete-orphan")
@@ -41,17 +50,36 @@ class MidiaProduto(Base):
 class Compra(Base):
     __tablename__ = "compras"
     id = Column(Integer, primary_key=True, index=True)
-    aluno_email = Column(String(100), nullable=False)
-    produto_id = Column(Integer, ForeignKey("produtos.id"))
-    valor_pago = Column(Float, nullable=False) # Guardar o preço no momento da compra
+    aluno_email = Column(String(100), nullable=False, index=True)
+    produto_id = Column(Integer, ForeignKey("produtos.id"), index=True)
+    valor_pago = Column(Float, nullable=False)
+    
+    # Campo para identificar o tipo na hora da compra
+    tipo_entrega_momento = Column(String(20), default="digital")
+    
+    # Campos de Logística (apenas para físico)
+    status_logistica = Column(String(30), nullable=True) # 'pedente_envio', 'enviado', 'entregue'
+    codigo_rastreio = Column(String(100), nullable=True)
+    
+    # Endereço de Entrega
+    cep = Column(String(10), nullable=True)
+    logradouro = Column(String(150), nullable=True)
+    numero = Column(String(20), nullable=True)
+    complemento = Column(String(100), nullable=True)
+    bairro = Column(String(100), nullable=True)
+    cidade = Column(String(100), nullable=True)
+    estado = Column(String(2), nullable=True)
+    
     data_compra = Column(DateTime(timezone=True), server_default=func.now())
+    
+    produto = relationship("Produto")
 
 class Movimentacao(Base):
     __tablename__ = "movimentacoes"
     id = Column(Integer, primary_key=True, index=True)
-    vendedor_email = Column(String(100), nullable=False)
+    vendedor_email = Column(String(100), nullable=False, index=True)
     valor = Column(Float, nullable=False)
-    tipo = Column(String(20)) # 'venda' ou 'saque'
+    tipo = Column(String(20), index=True) # 'venda' ou 'saque'
     status = Column(String(20), default="concluido") # 'concluido' ou 'pendente'
     chave_pix = Column(String(100), nullable=True)
     data = Column(DateTime(timezone=True), server_default=func.now())
@@ -59,8 +87,8 @@ class Movimentacao(Base):
 class Avaliacao(Base):
     __tablename__ = "avaliacoes"
     id = Column(Integer, primary_key=True, index=True)
-    produto_id = Column(Integer, ForeignKey("produtos.id"), nullable=False)
-    aluno_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+    produto_id = Column(Integer, ForeignKey("produtos.id"), nullable=False, index=True)
+    aluno_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False, index=True)
     nota = Column(Integer, nullable=False) # e.g., 1 to 5
     comentario = Column(String(500), nullable=True)
     data_avaliacao = Column(DateTime(timezone=True), server_default=func.now())

@@ -18,12 +18,38 @@ const ProdutoDetalhe = () => {
     const [userBoughtProduct, setUserBoughtProduct] = useState(false);
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [userPerfil, setUserPerfil] = useState('');
+    
+    // Pagination for reviews
+    const [reviewPage, setReviewPage] = useState(1);
+    const [totalReviewPages, setTotalReviewPages] = useState(1);
+    const [totalReviews, setTotalReviews] = useState(0);
+
+    const [endereco, setEndereco] = useState({
+        cep: '',
+        logradouro: '',
+        numero: '',
+        complemento: '',
+        bairro: '',
+        cidade: '',
+        estado: ''
+    });
+
+    const fetchReviews = async (p = 1) => {
+        try {
+            const reviewsRes = await api.get(`/api/produtos/${id}/avaliacoes?page=${p}&per_page=5`);
+            setReviews(reviewsRes.data.items || []);
+            setTotalReviewPages(reviewsRes.data.total_pages || 1);
+            setReviewPage(reviewsRes.data.page || 1);
+            setTotalReviews(reviewsRes.data.total || 0);
+        } catch (err) {
+            console.error('Erro ao buscar avaliações:', err);
+        }
+    };
 
     useEffect(() => {
-        console.log('ProdutoDetalhe: useEffect started, id:', id); // LOG 1
+        console.log('ProdutoDetalhe: useEffect started, id:', id);
 
         if (!id || isNaN(parseInt(id))) {
-            console.log('ProdutoDetalhe: Invalid ID, redirecting to /vitrine. ID:', id); // LOG 2
             navigate('/vitrine');
             return;
         }
@@ -35,43 +61,38 @@ const ProdutoDetalhe = () => {
             setUserPerfil(usuario.perfil);
         }
 
-        const fetchProductAndReviews = async () => {
+        const fetchProductAndData = async () => {
             setLoading(true);
             setError(null);
             try {
                 const productRes = await api.get(`/api/produtos/${id}`);
-                console.log('ProdutoDetalhe: API response for product:', productRes.data); // LOG 3
                 setProduct(productRes.data);
 
                 if (productRes.data.midias && productRes.data.midias.length > 0) {
-                    const imageUrl = `http://localhost:8000/${productRes.data.midias[0].url}`;
-                    console.log('ProdutoDetalhe: Setting currentImage to:', imageUrl); // LOG 4
-                    setCurrentImage(imageUrl);
-                } else {
-                    console.log('ProdutoDetalhe: No midias found for product.'); // LOG 5
+                    setCurrentImage(`http://localhost:8000/${productRes.data.midias[0].url}`);
                 }
 
-                // Fetch product reviews
-                const reviewsRes = await api.get(`/api/produtos/${id}/avaliacoes`);
-                setReviews(reviewsRes.data);
+                // Initial fetch of reviews
+                await fetchReviews(1);
 
                 // Check if logged-in user bought this product
-                if (isLoggedIn && usuario.perfil === 'aluno') {
+                if (token && usuario.perfil === 'aluno') {
                     const meusCursosRes = await api.get('/api/meus-cursos');
-                    const bought = meusCursosRes.data.some(course => course.id === parseInt(id));
+                    const data = meusCursosRes.data.items || meusCursosRes.data;
+                    const bought = (data || []).some(course => course.id === parseInt(id));
                     setUserBoughtProduct(bought);
                 }
 
             } catch (err) {
                 setError('Falha ao carregar detalhes do produto.');
-                console.error('Erro ao buscar produto ou avaliações:', err); // LOG 6
+                console.error('Erro ao buscar produto ou dados:', err);
             } finally {
                 setLoading(false);
             }
         };
 
-        fetchProductAndReviews();
-    }, [id, isLoggedIn, userPerfil, navigate]);
+        fetchProductAndData();
+    }, [id, navigate]);
 
     const handleReviewSubmit = async (e) => {
         e.preventDefault();
@@ -87,9 +108,8 @@ const ProdutoDetalhe = () => {
                 comentario: newReview.comentario,
             });
             setNewReview({ nota: 0, comentario: '' });
-            // Re-fetch reviews to show the new one
-            const reviewsRes = await api.get(`/api/produtos/${id}/avaliacoes`);
-            setReviews(reviewsRes.data);
+            // Re-fetch reviews to show the new one at the first page
+            await fetchReviews(1);
         } catch (err) {
             setReviewError(err.response?.data?.detail || 'Erro ao enviar avaliação.');
             console.error('Erro ao enviar avaliação:', err);
@@ -97,13 +117,28 @@ const ProdutoDetalhe = () => {
     };
 
     const handleBuyProduct = async () => {
+        if (product.tipo_entrega === 'fisico') {
+            const emptyFields = Object.entries(endereco).filter(([key, val]) => key !== 'complemento' && !val);
+            if (emptyFields.length > 0) {
+                alert('Por favor, preencha todos os campos de endereço obrigatórios.');
+                return;
+            }
+        }
+
         try {
-            await api.post(`/api/produtos/comprar/${id}`);
-            alert('Produto comprado com sucesso!');
-            navigate('/app/meus-cursos'); // Redireciona para Meus Cursos após a compra
+            const body = product.tipo_entrega === 'fisico' ? { endereco } : { endereco: null };
+            await api.post(`/api/produtos/comprar/${id}`, body);
+            alert('Compra realizada com sucesso!');
+            navigate('/app/meus-cursos');
         } catch (err) {
             alert(err.response?.data?.detail || 'Erro ao comprar o produto.');
             console.error('Erro ao comprar produto:', err);
+        }
+    };
+
+    const handleReviewPageChange = (newPage) => {
+        if (newPage >= 1 && newPage <= totalReviewPages) {
+            fetchReviews(newPage);
         }
     };
 
@@ -111,7 +146,8 @@ const ProdutoDetalhe = () => {
     if (error) return <p className="error-message">{error}</p>;
     if (!product) return <p>Produto não encontrado.</p>;
 
-    const isSeller = isLoggedIn && userPerfil === 'vendedor' && product.vendedor_email === JSON.parse(localStorage.getItem('usuario') || '{}').email;
+    const usuarioStorage = JSON.parse(localStorage.getItem('usuario') || '{}');
+    const isSeller = isLoggedIn && userPerfil === 'vendedor' && product.vendedor_email === usuarioStorage.email;
 
     const getStarRating = (nota) => {
         return Array(5).fill(0).map((_, i) => (
@@ -120,8 +156,8 @@ const ProdutoDetalhe = () => {
     };
 
     return (
-        <> {/* Use a fragment or a div */}
-            <Header /> {/* <--- NEW HEADER COMPONENT */}
+        <div className="product-layout">
+            <Header />
             <div className="product-detail-container">
                 <button onClick={() => navigate(-1)} className="btn-text back-button">
                     &larr; Voltar
@@ -133,7 +169,6 @@ const ProdutoDetalhe = () => {
                         <div className="media-thumbnail-list">
                             {product.midias.map((media, index) => {
                                 const thumbnailUrl = `http://localhost:8000/${media.url}`;
-                                console.log('ProdutoDetalhe: Thumbnail URL:', thumbnailUrl, 'for media:', media); // LOG 7
                                 return (
                                     <img 
                                         key={index} 
@@ -151,19 +186,52 @@ const ProdutoDetalhe = () => {
                         <p className="product-price">R$ {product.preco.toFixed(2)}</p>
                         <div className="product-meta">
                             <p><User size={16}/> Vendedor: {product.vendedor_email}</p>
-                            <p><Package size={16}/> Tipo: {product.tipo}</p>
+                            <p><Package size={16}/> Tipo: {product.tipo} ({product.tipo_entrega})</p>
+                            {product.tipo_entrega === 'fisico' && (
+                                <p style={{ color: product.estoque > 0 ? 'var(--ml-green)' : 'red', fontWeight: 700 }}>
+                                    {product.estoque > 0 ? `Estoque: ${product.estoque} unidades` : 'Produto Esgotado'}
+                                </p>
+                            )}
                         </div>
                         <p className="product-description">{product.descricao}</p>
+
                         {isLoggedIn && userPerfil === 'aluno' && !userBoughtProduct && !isSeller && (
-                            <button onClick={handleBuyProduct} className="btn-primary w-full mt-4">Comprar Produto</button>
+                            <>
+                                {product.tipo_entrega === 'fisico' && product.estoque > 0 && (
+                                    <div className="address-form-box fade-in" style={{ background: '#f8fafc', padding: '1.5rem', borderRadius: '12px', border: '1px solid var(--border)', marginBottom: '1.5rem', marginTop: '1.5rem' }}>
+                                        <p style={{ fontWeight: 700, marginTop: 0, marginBottom: '1rem' }}>Endereço de Entrega</p>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '10px', marginBottom: '10px' }}>
+                                            <input type="text" placeholder="CEP" value={endereco.cep} onChange={e => setEndereco({...endereco, cep: e.target.value})} maxLength="9" />
+                                            <input type="text" placeholder="Cidade" value={endereco.cidade} onChange={e => setEndereco({...endereco, cidade: e.target.value})} />
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                                            <input type="text" placeholder="Rua / Logradouro" value={endereco.logradouro} onChange={e => setEndereco({...endereco, logradouro: e.target.value})} />
+                                            <input type="text" placeholder="Nº" value={endereco.numero} onChange={e => setEndereco({...endereco, numero: e.target.value})} />
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                                            <input type="text" placeholder="Bairro" value={endereco.bairro} onChange={e => setEndereco({...endereco, bairro: e.target.value})} />
+                                            <input type="text" placeholder="UF" value={endereco.estado} onChange={e => setEndereco({...endereco, estado: e.target.value})} maxLength="2" />
+                                            <input type="text" placeholder="Compl." value={endereco.complemento} onChange={e => setEndereco({...endereco, complemento: e.target.value})} />
+                                        </div>
+                                    </div>
+                                )}
+                                
+                                {(product.tipo_entrega !== 'fisico' || product.estoque > 0) && (
+                                    <button onClick={handleBuyProduct} className="btn-primary w-full mt-4">
+                                        {product.tipo_entrega === 'fisico' ? 'Confirmar Endereço e Comprar' : 'Comprar Agora'}
+                                    </button>
+                                )}
+                            </>
                         )}
                         {!isLoggedIn && (
                             <p className="info-message mt-4">Faça login como aluno para comprar este produto.</p>
                         )}
                         {isLoggedIn && userPerfil === 'aluno' && userBoughtProduct && (
-                            <p className="info-message mt-4">Você já comprou este produto.</p>
+                            <p className="info-message mt-4">
+                                {product.tipo_entrega === 'fisico' ? 'Você já comprou este produto. Acompanhe a entrega no seu perfil.' : 'Você já possui este conteúdo.'}
+                            </p>
                         )}
-                        {isLoggedIn && userPerfil === 'vendedor' && (
+                        {isLoggedIn && userPerfil === 'vendedor' && !isSeller && (
                             <p className="info-message mt-4">Vendedores não podem comprar produtos na vitrine.</p>
                         )}
                         {isSeller && (
@@ -173,7 +241,7 @@ const ProdutoDetalhe = () => {
                 </div>
 
                 <div className="product-reviews">
-                    <h2>Avaliações dos Clientes ({reviews.length})</h2>
+                    <h2>Avaliações dos Clientes ({totalReviews})</h2>
                     {reviews.length === 0 && <p>Nenhuma avaliação ainda. Seja o primeiro a avaliar!</p>}
                     
                     <div className="review-list">
@@ -188,6 +256,14 @@ const ProdutoDetalhe = () => {
                             </div>
                         ))}
                     </div>
+
+                    {totalReviewPages > 1 && (
+                        <div className="pagination" style={{ margin: '1.5rem 0' }}>
+                            <button onClick={() => handleReviewPageChange(reviewPage - 1)} disabled={reviewPage === 1} className="btn-pagination">Anterior</button>
+                            <span className="page-info">Página {reviewPage} de {totalReviewPages}</span>
+                            <button onClick={() => handleReviewPageChange(reviewPage + 1)} disabled={reviewPage === totalReviewPages} className="btn-pagination">Próxima</button>
+                        </div>
+                    )}
 
                     {isLoggedIn && userPerfil === 'aluno' && userBoughtProduct && (
                         <div className="review-form-container">
@@ -225,7 +301,7 @@ const ProdutoDetalhe = () => {
                     {isLoggedIn && userPerfil === 'aluno' && !userBoughtProduct && <p className="info-message">Compre este produto para poder deixar uma avaliação.</p>}
                 </div>
             </div>
-        </>
+        </div>
     );
 };
 

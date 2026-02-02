@@ -7,7 +7,8 @@ import {
   User, 
   LogOut, 
   Store, 
-  BookOpen 
+  BookOpen,
+  Truck 
 } from 'lucide-react';
 import './App.css';
 import Login from './pages/Login';
@@ -20,8 +21,9 @@ import Alunos from './pages/Alunos';
 import Financeiro from './pages/Financeiro';
 import Perfil from './pages/Perfil';
 import PerfilAluno from './pages/PerfilAluno';
-import ProdutoDetalhe from './pages/ProdutoDetalhe'; // NOVO IMPORT
-import Header from './components/Header'; // RE-ADD THIS IMPORT
+import ProdutoDetalhe from './pages/ProdutoDetalhe';
+import Vendas from './pages/Vendas'; // <--- NEW IMPORT
+import Header from './components/Header';
 
 // --- COMPONENTE DE PROTEÇÃO DE ROTA ---
 // Verifica se o usuário está logado e se tem permissão para a rota
@@ -79,6 +81,9 @@ function DashboardLayout({ children }) {
               </Link>
               <Link to="/app/financeiro" className={`nav-item ${location.pathname === '/app/financeiro' ? 'active' : ''}`}>
                 <DollarSign size={20}/> Financeiro
+              </Link>
+              <Link to="/app/vendas" className={`nav-item ${location.pathname === '/app/vendas' ? 'active' : ''}`}>
+                <Truck size={20}/> Minhas Vendas
               </Link>
               <Link to="/app/perfil" className={`nav-item ${location.pathname === '/app/perfil' ? 'active' : ''}`}>
                 <User size={20}/> Perfil
@@ -158,6 +163,7 @@ function App() {
                 <Route path="produtos" element={<ProtectedRoute roleRequired="vendedor"><Produtos /></ProtectedRoute>} />
                 <Route path="alunos" element={<ProtectedRoute roleRequired="vendedor"><Alunos /></ProtectedRoute>} />
                 <Route path="financeiro" element={<ProtectedRoute roleRequired="vendedor"><Financeiro /></ProtectedRoute>} />
+                <Route path="vendas" element={<ProtectedRoute roleRequired="vendedor"><Vendas /></ProtectedRoute>} />
                 <Route path="perfil" element={<ProtectedRoute roleRequired="vendedor"><Perfil /></ProtectedRoute>} />
 
                 {/* Rotas acessíveis ao Aluno */}

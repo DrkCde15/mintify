@@ -1,7 +1,19 @@
-# back-end/schemas.py
 from pydantic import BaseModel, EmailStr
-from typing import Optional, List
+from typing import Optional, List, Generic, TypeVar
 from datetime import datetime
+
+T = TypeVar('T')
+
+class PaginatedParams(BaseModel):
+    page: int = 1
+    per_page: int = 12
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    items: List[T]
+    total: int
+    page: int
+    per_page: int
+    total_pages: int
 
 class UsuarioCreate(BaseModel):
     nome: str
@@ -40,8 +52,51 @@ class ProdutoResponse(BaseModel):
     vendas_count: int
     arquivo_url: Optional[str] = None # Adicionado para retornar a URL do arquivo principal
     
+    # Novos campos para produtos físicos
+    tipo_entrega: str
+    estoque: int = 0
+    peso_kg: Optional[float] = None
+    largura_cm: Optional[float] = None
+    altura_cm: Optional[float] = None
+    comprimento_cm: Optional[float] = None
+    
     class Config:
         from_attributes = True
+
+class EnderecoEntrega(BaseModel):
+    cep: str
+    logradouro: str
+    numero: str
+    complemento: Optional[str] = None
+    bairro: str
+    cidade: str
+    estado: str
+
+class CompraRequest(BaseModel):
+    endereco: Optional[EnderecoEntrega] = None
+
+class CompraResponse(BaseModel):
+    id: int
+    aluno_email: EmailStr
+    produto_id: int
+    valor_pago: float
+    tipo_entrega_momento: str
+    status_logistica: Optional[str] = None
+    codigo_rastreio: Optional[str] = None
+    data_compra: datetime
+    
+    # Endereço
+    cep: Optional[str] = None
+    logradouro: Optional[str] = None
+    numero: Optional[str] = None
+    cidade: Optional[str] = None
+    estado: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class CompraComProduto(CompraResponse):
+    produto: ProdutoResponse
 
 class DashboardStats(BaseModel):
     saldo_total: float
