@@ -34,12 +34,7 @@ from utils.validators import (
     validar_comentario
 )
 
-try:
-    from utils.email import enviar_notificacao_venda
-    EMAIL_ENABLED = True
-except ImportError:
-    EMAIL_ENABLED = False
-    print("⚠️  Módulo de e-mail não disponível. Notificações desabilitadas.")
+from utils.notifications import notificar_venda, notificar_rastreio, criar_notificacao
 
 # 1. Inicia as tabelas no Banco de Dados
 models.Base.metadata.create_all(bind=engine)
@@ -288,6 +283,7 @@ async def upload_produto(
         # Registrar no banco
         db.add(models.MidiaProduto(
             produto_id=novo_produto.id,
+            titulo=imagem.filename or f"Imagem {ordem_midia + 1}",
             url=f"uploads/imagens/{processed_file_name}",
             tipo="imagem",
             ordem=ordem_midia
@@ -329,6 +325,7 @@ async def upload_produto(
         # Registrar no banco
         db.add(models.MidiaProduto(
             produto_id=novo_produto.id,
+            titulo=arquivo.filename or f"Aula {ordem_midia + 1}",
             url=f"uploads/arquivos/{file_name}",
             tipo=media_tipo,
             ordem=ordem_midia
@@ -474,18 +471,10 @@ async def comprar_produto(
         # 3. Atualiza contador de vendas
         prod.vendas_count += 1
         
-        db.commit()
+        # 4. NOTIFICAÇÕES (In-App e Email)
+        notificar_venda(db, prod.vendedor_email, prod.titulo, prod.preco)
 
-        # 4. GATILHO DE E-MAIL (RESEND)
-        if EMAIL_ENABLED:
-            try:
-                enviar_notificacao_venda(
-                    email_vendedor=prod.vendedor_email,
-                    nome_produto=prod.titulo,
-                    valor=prod.preco
-                )
-            except Exception as e:
-                print(f"⚠️  Erro ao enviar e-mail: {e}")
+        db.commit()
 
         return {"message": "Compra realizada com sucesso!", "tipo": prod.tipo_entrega}
 
@@ -750,6 +739,125 @@ async def atualizar_logistica_venda(
         venda.status_logistica = status_logistica
     if codigo_rastreio:
         venda.codigo_rastreio = codigo_rastreio
+        # Notificar o aluno sobre o rastreio
+        notificar_rastreio(db, venda.aluno_email, venda.produto.titulo, codigo_rastreio)
         
     db.commit()
     return {"message": "Logística atualizada com sucesso!"}
+
+# --- ROTAS DE NOTIFICAÇÕES ---
+
+@app.get("/api/notificacoes", response_model=List[schemas.NotificacaoResponse])
+def listar_notificacoes(db: Session = Depends(get_db), email: str = Depends(get_current_user)):
+    """Lista as notificações do usuário logado"""
+    return db.query(models.Notificacao)\
+             .filter(models.Notificacao.usuario_email == email)\
+             .order_by(models.Notificacao.data_criacao.desc())\
+             .limit(50)\
+             .all()
+
+@app.patch("/api/notificacoes/{notificacao_id}")
+async def marcar_notificacao_lida(
+    notificacao_id: int, 
+    dados: schemas.NotificacaoUpdate,
+    db: Session = Depends(get_db), 
+    email: str = Depends(get_current_user)
+):
+    notif = db.query(models.Notificacao).filter(
+        models.Notificacao.id == notificacao_id,
+        models.Notificacao.usuario_email == email
+    ).first()
+    
+    if not notif:
+        raise HTTPException(status_code=404, detail="Notificação não encontrada")
+    
+    notif.lida = dados.lida
+    db.commit()
+    return {"message": "Status atualizado"}
+
+# --- ÁREA DE MEMBROS (MEMBER AREA) ---
+
+@app.get("/api/membros/curso/{produto_id}")
+async def get_materiais_curso(
+    produto_id: int, 
+    db: Session = Depends(get_db), 
+    email: str = Depends(get_current_user)
+):
+    """Retorna os detalhes do curso, mídias e progresso do aluno"""
+    # 1. Verificar se o usuário comprou o curso
+    compra = db.query(models.Compra).filter(
+        models.Compra.aluno_email == email, 
+        models.Compra.produto_id == produto_id
+    ).first()
+    
+    if not compra:
+         raise HTTPException(
+             status_code=status.HTTP_403_FORBIDDEN, 
+             detail="Você não tem acesso a este produto. Por favor, realize a compra para acessar."
+         )
+    
+    # 2. Buscar produto e suas mídias
+    produto = db.query(models.Produto)\
+                .options(joinedload(models.Produto.midias))\
+                .filter(models.Produto.id == produto_id)\
+                .first()
+    
+    # 3. Buscar progresso do aluno nestas mídias
+    progresso = db.query(models.ProgressoAula).filter(
+        models.ProgressoAula.aluno_email == email
+    ).all()
+    midias_concluidas = {p.midia_id for p in progresso}
+    
+    # 4. Formatar resposta
+    aulas = []
+    for m in sorted(produto.midias, key=lambda x: x.ordem):
+        aulas.append({
+            "id": m.id,
+            "titulo": m.titulo or f"Aula {m.ordem + 1}",
+            "url": m.url,
+            "tipo": m.tipo,
+            "concluida": m.id in midias_concluidas
+        })
+        
+    return {
+        "produto": {
+            "id": produto.id,
+            "titulo": produto.titulo,
+            "descricao": produto.descricao
+        },
+        "aulas": aulas
+    }
+
+@app.post("/api/membros/concluir-aula/{midia_id}")
+async def concluir_aula(
+    midia_id: int, 
+    db: Session = Depends(get_db), 
+    email: str = Depends(get_current_user)
+):
+    """Marca uma aula/mídia como concluída pelo aluno"""
+    # 1. Verificar se a mídia existe
+    midia = db.query(models.MidiaProduto).filter(models.MidiaProduto.id == midia_id).first()
+    if not midia:
+        raise HTTPException(status_code=404, detail="Aula não encontrada")
+    
+    # 2. Verificar se o usuário tem a compra desse produto
+    compra = db.query(models.Compra).filter(
+        models.Compra.aluno_email == email, 
+        models.Compra.produto_id == midia.produto_id
+    ).first()
+    
+    if not compra:
+        raise HTTPException(status_code=403, detail="Você não possui acesso a este produto")
+    
+    # 3. Registrar progresso (evitar duplicatas)
+    existente = db.query(models.ProgressoAula).filter(
+        models.ProgressoAula.aluno_email == email, 
+        models.ProgressoAula.midia_id == midia_id
+    ).first()
+    
+    if not existente:
+        novo_progresso = models.ProgressoAula(aluno_email=email, midia_id=midia_id)
+        db.add(novo_progresso)
+        db.commit()
+    
+    return {"message": "Aula concluída com sucesso!"}

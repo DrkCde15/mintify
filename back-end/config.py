@@ -2,7 +2,7 @@
 Configurações da aplicação usando Pydantic Settings
 Carrega e valida variáveis de ambiente
 """
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 
 
@@ -40,9 +40,7 @@ class Settings(BaseSettings):
         """Converte string de origens CORS em lista"""
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
 
 
 # Instância global de configurações

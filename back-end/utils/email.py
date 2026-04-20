@@ -1,8 +1,8 @@
 import resend
-import os
+from config import settings
 
-# Substitua pela chave que você copiou do painel do Resend
-resend.api_key = os.getenv("EMAIL_API")
+# Usa a chave correta vinda do seu .env
+resend.api_key = settings.RESEND_API_KEY
 
 def enviar_notificacao_venda(email_vendedor: str, nome_produto: str, valor: float):
     try:

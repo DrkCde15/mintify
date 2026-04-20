@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 from typing import Optional, List, Generic, TypeVar
 from datetime import datetime
 
@@ -30,16 +30,22 @@ class UsuarioUpdate(BaseModel):
     chave_pix: Optional[str] = None
 
 class MidiaProdutoBase(BaseModel):
-    url: str # Changed from HttpUrl to str
+    url: str
+    titulo: Optional[str] = None
     tipo: str # 'imagem', 'video', 'arquivo'
     ordem: int = 0
+
+class ProgressoAulaSchema(BaseModel):
+    midia_id: int
+    data_conclusao: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 class MidiaProdutoResponse(MidiaProdutoBase):
     id: int
     produto_id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ProdutoResponse(BaseModel):
     id: int
@@ -60,8 +66,7 @@ class ProdutoResponse(BaseModel):
     altura_cm: Optional[float] = None
     comprimento_cm: Optional[float] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class EnderecoEntrega(BaseModel):
     cep: str
@@ -92,8 +97,7 @@ class CompraResponse(BaseModel):
     cidade: Optional[str] = None
     estado: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class CompraComProduto(CompraResponse):
     produto: ProdutoResponse
@@ -104,12 +108,12 @@ class DashboardStats(BaseModel):
     novos_alunos: int
 
 class UsuarioSimples(BaseModel):
+    id: int
     nome: str
     email: EmailStr
     perfil: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class Token(BaseModel):
     access_token: str
@@ -128,5 +132,17 @@ class Avaliacao(BaseModel):
     data_avaliacao: datetime
     aluno: UsuarioSimples
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+class NotificacaoResponse(BaseModel):
+    id: int
+    titulo: str
+    mensagem: str
+    tipo: str
+    lida: int
+    data_criacao: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class NotificacaoUpdate(BaseModel):
+    lida: int

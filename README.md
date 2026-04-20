@@ -6,11 +6,12 @@ O **Mintify** é uma plataforma full-stack moderna para venda e gestão de produ
 
 ### Frontend
 
-- **React.js (Vite)**: Performance e agilidade no desenvolvimento.
-- **React Router DOM**: Gerenciamento de rotas e navegação na aplicação.
-- **Axios**: Cliente HTTP configurado com **Interceptors** para anexar automaticamente o Token JWT.
-- **Lucide React**: Biblioteca de ícones moderna e personalizável.
-- **Contexto de Autenticação**: Proteção de rotas privadas e persistência de sessão via `localStorage`.
+- **Next.js (App Router)**: Framework React para produção com SSR, otimização de imagens e rotas avançadas.
+- **TailwindCSS**: Estilização moderna e responsiva utilizando classes utilitárias.
+- **Radix UI / Shadcn UI**: Componentes de interface acessíveis e altamente customizáveis.
+- **Lucide React**: Biblioteca de ícones moderna.
+- **Axios**: Cliente HTTP configurado para integração com o Backend FastAPI.
+- **Zustand**: Gerenciamento de estado leve e eficiente.
 
 ### Backend
 
@@ -79,26 +80,8 @@ npm run dev
 
 ## 🖼️ Funcionalidades Implementadas
 
-### ✅ Fase 1 - Segurança e Core
-
-- [x] **Sistema de Autenticação**: Login e Cadastro seguro (bcrypt).
-- [x] **Rate Limiting**: Proteção em todas as rotas críticas.
-- [x] **Validação de Uploads**: Filtros rigorosos por tipo, tamanho e sanitização de nomes.
-- [x] **Motor Financeiro**: Fluxo automático de créditos e débitos (Venda/Saque).
-- [x] **Envio de E-mails**: Notificações automáticas via Resend.
-
-### ✅ Fase 2 - Performance e Logística (Atual)
-
-- [x] **Paginação Universal**: Implementada em Vitrine, Meus Cursos, Avaliações e Gestão de Alunos para otimização de carga.
-- [x] **Otimização de Imagens**: Compressão automática e conversão para **WebP** no upload (uso de Pillow).
-- [x] **Suporte a Produtos Físicos**: Controle de estoque, peso e dimensões.
-- [x] **Gestão de Logística**: Cadastro de endereços no checkout e atualização de rastreio pelo vendedor.
-- [x] **Banco de Dados Otimizado**: Adição de índices em colunas estratégicas para consultas rápidas.
-
+- [x] **Área de Membros Premium**: Experiência do aluno com player de vídeo, materiais de apoio e controle de progresso.
+- [x] **Gestão de Notificações**: Alertas in-app e por e-mail para vendas e logística.
+- [x] **Marketplace Híbrido**: Suporte a infoprodutos e e-commerce físico na mesma plataforma.
+- [x] **Otimização Visual**: Processamento de imagens via servidor para garantir carregamento ultra-rápido.
 ---
-
-## 🛤️ Próximos Passos (Roadmap)
-
-- [ ] **Fase 3 - Qualidade**: Implementação de testes automatizados.
-- [ ] **Fase 4 - Notificações**: Sistema in-app e alertas push.
-- [ ] **Fase 5 - Integrações**: Cálculo automático de frete.

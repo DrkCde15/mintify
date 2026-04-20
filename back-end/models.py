@@ -42,6 +42,7 @@ class MidiaProduto(Base):
     __tablename__ = "midias_produto"
     id = Column(Integer, primary_key=True, index=True)
     produto_id = Column(Integer, ForeignKey("produtos.id"), nullable=False)
+    titulo = Column(String(150), nullable=True) 
     url = Column(String(255), nullable=False)
     tipo = Column(String(20), nullable=False) # 'imagem', 'video', 'arquivo'
     ordem = Column(Integer, default=0) # Para ordenar a exibição
@@ -94,3 +95,20 @@ class Avaliacao(Base):
     data_avaliacao = Column(DateTime(timezone=True), server_default=func.now())
     produto = relationship("Produto", back_populates="avaliacoes")
     aluno = relationship("Usuario", back_populates="avaliacoes")
+
+class Notificacao(Base):
+    __tablename__ = "notificacoes"
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_email = Column(String(100), ForeignKey("usuarios.email"), nullable=False, index=True)
+    titulo = Column(String(150), nullable=False)
+    mensagem = Column(String(500), nullable=False)
+    tipo = Column(String(50), default="geral") # 'venda', 'entrega', 'sistema'
+    lida = Column(Integer, default=0) # 0 = não lida, 1 = lida
+    data_criacao = Column(DateTime(timezone=True), server_default=func.now())
+
+class ProgressoAula(Base):
+    __tablename__ = "progresso_aulas"
+    id = Column(Integer, primary_key=True, index=True)
+    aluno_email = Column(String(100), ForeignKey("usuarios.email"), nullable=False, index=True)
+    midia_id = Column(Integer, ForeignKey("midias_produto.id"), nullable=False)
+    data_conclusao = Column(DateTime(timezone=True), server_default=func.now())
