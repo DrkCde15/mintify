@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { isAxiosError } from "axios"
 import { Bell, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -11,29 +12,43 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { useAuthStore } from "@/lib/store"
 import api, { type Notificacao } from "@/lib/api"
 
 export function NotificationBell() {
   const [notifications, setNotifications] = useState<Notificacao[]>([])
   const [isOpen, setIsOpen] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
+  const { isAuthenticated, token } = useAuthStore()
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = useCallback(async () => {
+    if (!isAuthenticated || !token) return
+
     try {
       const response = await api.get("/api/notificacoes")
       const data = response.data as Notificacao[]
       setNotifications(data)
       setUnreadCount(data.filter((n) => n.lida === 0).length)
     } catch (error) {
+      if (isAxiosError(error) && error.response?.status === 401) return
       console.error("Erro ao buscar notificações:", error)
     }
-  }
+  }, [isAuthenticated, token])
 
   useEffect(() => {
-    fetchNotifications()
-    const interval = setInterval(fetchNotifications, 60000)
+    if (!isAuthenticated || !token) {
+      setNotifications([])
+      setUnreadCount(0)
+      return
+    }
+
+    void fetchNotifications()
+    const interval = setInterval(() => {
+      void fetchNotifications()
+    }, 60000)
+
     return () => clearInterval(interval)
-  }, [])
+  }, [fetchNotifications, isAuthenticated, token])
 
   const markAsRead = async (id: number) => {
     try {

@@ -9,6 +9,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import traceback
 import uuid
 from datetime import datetime
+from config import settings
 
 
 async def error_handler_middleware(request: Request, call_next):
@@ -32,10 +33,14 @@ async def error_handler_middleware(request: Request, call_next):
         print(traceback.format_exc())
         print(f"{'='*80}\n")
         
+        detail_message = "Erro interno do servidor. Por favor, tente novamente mais tarde."
+        if settings.DEBUG:
+            detail_message = f"Erro interno: {str(exc)}"
+
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
-                "detail": "Erro interno do servidor. Por favor, tente novamente mais tarde.",
+                "detail": detail_message,
                 "error_id": error_id,
                 "timestamp": datetime.now().isoformat()
             }

@@ -26,6 +26,8 @@ class Produto(Base):
     vendedor_email = Column(String(100), nullable=False, index=True)
     status = Column(String(20), default="Ativo", index=True)   
     vendas_count = Column(Integer, default=0)
+    checkout_url = Column(String(255), nullable=True)
+    cakto_external_id = Column(String(100), nullable=True, index=True)
     
     # Novos campos para produtos físicos
     estoque = Column(Integer, default=0)

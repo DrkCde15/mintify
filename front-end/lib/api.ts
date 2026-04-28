@@ -1,4 +1,5 @@
 import axios, { type AxiosInstance, type AxiosError } from "axios"
+import { useAuthStore } from "./store"
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
@@ -10,7 +11,7 @@ export const api: AxiosInstance = axios.create({
   },
 })
 
-// Interceptor para adicionar token de autenticação
+// Interceptor para adicionar token de autenticacao
 api.interceptors.request.use(
   (config) => {
     if (typeof window !== "undefined") {
@@ -28,13 +29,16 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
-    if (error.response?.status === 401) {
-      // Token expirado ou inválido
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("access_token")
-        localStorage.removeItem("usuario")
-        localStorage.removeItem("perfil")
-        window.location.href = "/login"
+    if (error.response?.status === 401 && typeof window !== "undefined") {
+      const hasToken = Boolean(localStorage.getItem("access_token"))
+
+      // So forca logout quando havia sessao ativa.
+      if (hasToken) {
+        useAuthStore.getState().logout()
+
+        if (window.location.pathname !== "/login") {
+          window.location.href = "/login"
+        }
       }
     }
     return Promise.reject(error)
@@ -63,6 +67,8 @@ export interface Produto {
   preco: number
   tipo: string
   tipo_entrega: "digital" | "fisico"
+  checkout_url?: string | null
+  cakto_external_id?: string | null
   estoque?: number
   midias: Midia[]
   vendedor_email?: string
@@ -82,7 +88,7 @@ export interface Compra {
   status_logistica?: string
   codigo_rastreio?: string
   aluno_email?: string
-  // Endereço
+  // Endereco
   cep?: string
   logradouro?: string
   numero?: string

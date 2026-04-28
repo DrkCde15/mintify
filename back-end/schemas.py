@@ -56,6 +56,8 @@ class ProdutoResponse(BaseModel):
     midias: List[MidiaProdutoResponse] = []
     status: str
     vendas_count: int
+    checkout_url: Optional[str] = None
+    cakto_external_id: Optional[str] = None
     arquivo_url: Optional[str] = None # Adicionado para retornar a URL do arquivo principal
     
     # Novos campos para produtos físicos

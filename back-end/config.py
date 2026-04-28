@@ -34,6 +34,18 @@ class Settings(BaseSettings):
     
     # Rate Limiting
     RATE_LIMIT_ENABLED: bool = True
+
+    # Fluxo de compra
+    # False: exige fluxo externo de pagamento (ex.: Cakto webhook) para liberar acesso.
+    # True: permite compra interna imediata (modo legado).
+    ALLOW_INTERNAL_PURCHASE: bool = False
+    
+    # Cakto API
+    CAKTO_BASE_URL: str = "https://api.cakto.com.br"
+    CAKTO_CLIENT_ID: str = ""
+    CAKTO_CLIENT_SECRET: str = ""
+    CAKTO_FALLBACK_CHECKOUT_URL: str = ""
+    CAKTO_AUTO_CREATE_CHECKOUT: bool = True
     
     @property
     def cors_origins_list(self) -> List[str]:

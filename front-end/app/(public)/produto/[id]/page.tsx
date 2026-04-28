@@ -118,6 +118,14 @@ export default function ProdutoDetalhePage({ params }: PageProps) {
   }
 
   const handleBuyProduct = async () => {
+    if (!product?.checkout_url) {
+      toast.error("Checkout da Cakto não configurado para este produto")
+      return
+    }
+
+    window.location.assign(product.checkout_url)
+    return
+
     if (product?.tipo_entrega === "fisico") {
       const requiredFields = ["cep", "logradouro", "numero", "bairro", "cidade", "estado"]
       const emptyFields = requiredFields.filter((key) => !endereco[key as keyof typeof endereco])
