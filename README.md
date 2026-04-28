@@ -39,8 +39,12 @@ SECRET_KEY=sua_chave_secreta_aqui
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=1440
 
-# E-mail (Resend)
-RESEND_API_KEY=re_sua_chave_aqui
+# E-mail (SMTP)
+EMAIL=seu_email@gmail.com
+EMAIL_PASS_APP=sua_senha_de_app
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USE_TLS=True
 
 # Configurações do App
 ENVIRONMENT=development

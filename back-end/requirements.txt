@@ -18,9 +18,6 @@ passlib[bcrypt]>=1.7.4
 python-jose[cryptography]>=3.3.0
 slowapi>=0.1.9
 
-# Email (opcional)
-resend>=0.7.0
-
 # Desenvolvimento e Testes
 pytest>=7.0.0
-httpx>=0.25.0
+httpx>=0.25.0

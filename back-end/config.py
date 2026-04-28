@@ -17,8 +17,16 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
     
-    # E-mail (Resend)
-    RESEND_API_KEY: str = ""
+    # E-mail (SMTP)
+    EMAIL: str = ""
+    EMAIL_PASS_APP: str = ""
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USE_TLS: bool = True
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_NAME: str = "Mintify"
+    SMTP_FROM_EMAIL: str = ""
     
     # Ambiente
     ENVIRONMENT: str = "development"
