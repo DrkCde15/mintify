@@ -12,6 +12,14 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -41,6 +49,9 @@ export default function ProdutoDetalhePage({ params }: PageProps) {
   const [reviewPage, setReviewPage] = useState(1)
   const [totalReviewPages, setTotalReviewPages] = useState(1)
   const [totalReviews, setTotalReviews] = useState(0)
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false)
+  const [formaPagamento, setFormaPagamento] = useState<"cartao" | "dinheiro" | "pix" | "">("")
+  const [buying, setBuying] = useState(false)
 
   const [endereco, setEndereco] = useState({
     cep: "",
@@ -118,14 +129,6 @@ export default function ProdutoDetalhePage({ params }: PageProps) {
   }
 
   const handleBuyProduct = async () => {
-    if (!product?.checkout_url) {
-      toast.error("Checkout da Cakto não configurado para este produto")
-      return
-    }
-
-    window.location.assign(product.checkout_url)
-    return
-
     if (product?.tipo_entrega === "fisico") {
       const requiredFields = ["cep", "logradouro", "numero", "bairro", "cidade", "estado"]
       const emptyFields = requiredFields.filter((key) => !endereco[key as keyof typeof endereco])
@@ -135,13 +138,25 @@ export default function ProdutoDetalhePage({ params }: PageProps) {
       }
     }
 
+    if (!formaPagamento) {
+      toast.error("Selecione a forma de pagamento")
+      return
+    }
+
     try {
-      const body = product?.tipo_entrega === "fisico" ? { endereco } : { endereco: null }
+      setBuying(true)
+      const body = {
+        forma_pagamento: formaPagamento,
+        endereco: product?.tipo_entrega === "fisico" ? endereco : null,
+      }
       await api.post(`/api/produtos/comprar/${id}`, body)
       toast.success("Compra realizada com sucesso!")
+      setPaymentModalOpen(false)
       router.push("/app/meus-cursos")
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Erro ao comprar o produto")
+    } finally {
+      setBuying(false)
     }
   }
 
@@ -278,7 +293,7 @@ export default function ProdutoDetalhePage({ params }: PageProps) {
                 )}
 
                 {(product.tipo_entrega !== "fisico" || (product.estoque && product.estoque > 0)) && (
-                  <Button onClick={handleBuyProduct} size="lg" className="w-full">
+                  <Button onClick={() => setPaymentModalOpen(true)} size="lg" className="w-full">
                     {product.tipo_entrega === "fisico" ? "Confirmar Endereço e Comprar" : "Comprar Agora"}
                   </Button>
                 )}
@@ -310,6 +325,43 @@ export default function ProdutoDetalhePage({ params }: PageProps) {
                 </CardContent>
               </Card>
             )}
+
+            <Dialog open={paymentModalOpen} onOpenChange={setPaymentModalOpen}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Escolha a forma de pagamento</DialogTitle>
+                  <DialogDescription>
+                    Selecione como deseja pagar para concluir a compra.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-2">
+                  <Label>Forma de pagamento</Label>
+                  <Select
+                    value={formaPagamento}
+                    onValueChange={(value) => setFormaPagamento(value as "cartao" | "dinheiro" | "pix")}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione uma opção" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cartao">Cartão</SelectItem>
+                      <SelectItem value="dinheiro">Dinheiro</SelectItem>
+                      <SelectItem value="pix">Pix</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setPaymentModalOpen(false)} disabled={buying}>
+                    Cancelar
+                  </Button>
+                  <Button onClick={handleBuyProduct} disabled={buying || !formaPagamento}>
+                    {buying ? "Processando..." : "Confirmar compra"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
 

@@ -26,8 +26,6 @@ class Produto(Base):
     vendedor_email = Column(String(100), nullable=False, index=True)
     status = Column(String(20), default="Ativo", index=True)   
     vendas_count = Column(Integer, default=0)
-    checkout_url = Column(String(255), nullable=True)
-    cakto_external_id = Column(String(100), nullable=True, index=True)
     
     # Novos campos para produtos físicos
     estoque = Column(Integer, default=0)
@@ -59,6 +57,7 @@ class Compra(Base):
     
     # Campo para identificar o tipo na hora da compra
     tipo_entrega_momento = Column(String(20), default="digital")
+    forma_pagamento = Column(String(20), nullable=True)
     
     # Campos de Logística (apenas para físico)
     status_logistica = Column(String(30), nullable=True) # 'pedente_envio', 'enviado', 'entregue'

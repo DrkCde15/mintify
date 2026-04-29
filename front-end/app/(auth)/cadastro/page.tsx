@@ -3,18 +3,28 @@
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Loader2 } from "lucide-react"
+import { Loader2, ShoppingCart, Store } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+type PerfilTipo = "aluno" | "vendedor"
+type TipoProdutoVendedor = "digital" | "fisico"
 
 export default function CadastroPage() {
   const router = useRouter()
-  const [formData, setFormData] = useState({ nome: "", email: "", senha: "" })
+  const [formData, setFormData] = useState({
+    nome: "",
+    email: "",
+    senha: "",
+    perfil: "aluno" as PerfilTipo,
+    chave_pix: "",
+    tipo_produto_interesse: "digital" as TipoProdutoVendedor,
+  })
   const [loading, setLoading] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -22,10 +32,22 @@ export default function CadastroPage() {
     setLoading(true)
 
     try {
+      const payload: Record<string, string> = {
+        nome: formData.nome,
+        email: formData.email,
+        senha: formData.senha,
+        perfil: formData.perfil,
+      }
+
+      if (formData.perfil === "vendedor") {
+        payload.chave_pix = formData.chave_pix.trim()
+        payload.tipo_produto_interesse = formData.tipo_produto_interesse
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/usuarios/cadastro`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(payload),
       })
 
       const data = await response.json()
@@ -62,6 +84,37 @@ export default function CadastroPage() {
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
+                <Label>Como voce quer usar o Mintify?</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, perfil: "aluno" })}
+                    className={cn(
+                      "rounded-lg border p-3 text-left transition-colors",
+                      formData.perfil === "aluno" ? "border-primary bg-primary/10" : "border-border hover:border-primary/40"
+                    )}
+                  >
+                    <div className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-muted">
+                      <ShoppingCart className="h-4 w-4" />
+                    </div>
+                    <p className="text-sm font-medium">Comprador</p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, perfil: "vendedor" })}
+                    className={cn(
+                      "rounded-lg border p-3 text-left transition-colors",
+                      formData.perfil === "vendedor" ? "border-primary bg-primary/10" : "border-border hover:border-primary/40"
+                    )}
+                  >
+                    <div className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-muted">
+                      <Store className="h-4 w-4" />
+                    </div>
+                    <p className="text-sm font-medium">Vendedor</p>
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="nome">Nome Completo</Label>
                 <Input
                   id="nome"
@@ -97,6 +150,50 @@ export default function CadastroPage() {
                   autoComplete="new-password"
                 />
               </div>
+              {formData.perfil === "vendedor" && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="chave_pix">Chave PIX para recebimento</Label>
+                    <Input
+                      id="chave_pix"
+                      type="text"
+                      placeholder="CPF, e-mail, telefone ou chave aleatoria"
+                      value={formData.chave_pix}
+                      onChange={(e) => setFormData({ ...formData, chave_pix: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>O que voce vai vender?</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, tipo_produto_interesse: "digital" })}
+                        className={cn(
+                          "rounded-lg border p-3 text-sm font-medium transition-colors",
+                          formData.tipo_produto_interesse === "digital"
+                            ? "border-primary bg-primary/10"
+                            : "border-border hover:border-primary/40"
+                        )}
+                      >
+                        Produtos digitais
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, tipo_produto_interesse: "fisico" })}
+                        className={cn(
+                          "rounded-lg border p-3 text-sm font-medium transition-colors",
+                          formData.tipo_produto_interesse === "fisico"
+                            ? "border-primary bg-primary/10"
+                            : "border-border hover:border-primary/40"
+                        )}
+                      >
+                        Produtos fisicos
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? (
                   <>

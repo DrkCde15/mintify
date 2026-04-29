@@ -18,6 +18,7 @@ import { Progress } from "@/components/ui/progress"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import api, { type Produto, type Aula, getMediaUrl } from "@/lib/api"
+import { toast } from "sonner"
 
 interface CursoPageProps {
   params: Promise<{ id: string }>
@@ -31,6 +32,7 @@ export default function CursoPage({ params }: CursoPageProps) {
   const [aulaAtual, setAulaAtual] = useState<Aula | null>(null)
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
+  const [baixandoId, setBaixandoId] = useState<number | null>(null)
 
   useEffect(() => {
     fetchMateriais()
@@ -63,6 +65,49 @@ export default function CursoPage({ params }: CursoPageProps) {
       }
     } catch (err) {
       console.error("Erro ao concluir aula:", err)
+    }
+  }
+
+  const extrairNomeArquivo = (contentDisposition?: string, fallback = "material-digital") => {
+    if (!contentDisposition) return fallback
+
+    const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+    if (utf8Match?.[1]) {
+      try {
+        return decodeURIComponent(utf8Match[1])
+      } catch {
+        return utf8Match[1]
+      }
+    }
+
+    const asciiMatch = contentDisposition.match(/filename="?([^"]+)"?/i)
+    if (asciiMatch?.[1]) return asciiMatch[1]
+    return fallback
+  }
+
+  const baixarMaterial = async (aula: Aula) => {
+    try {
+      setBaixandoId(aula.id)
+      const response = await api.get(`/api/membros/download/${aula.id}`, {
+        responseType: "blob",
+      })
+
+      const contentDisposition = response.headers["content-disposition"] as string | undefined
+      const fallbackName = `${(aula.titulo || "material").replace(/[^\w\-]+/g, "_") || "material"}`
+      const nomeArquivo = extrairNomeArquivo(contentDisposition, fallbackName)
+
+      const url = window.URL.createObjectURL(response.data)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = nomeArquivo
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Nao foi possivel baixar o material.")
+    } finally {
+      setBaixandoId(null)
     }
   }
 
@@ -134,15 +179,9 @@ export default function CursoPage({ params }: CursoPageProps) {
                     <FileText className="h-16 w-16 text-muted-foreground" />
                     <h3 className="text-lg font-semibold">{aulaAtual.titulo}</h3>
                     <p className="text-muted-foreground">Este é um material de apoio (PDF/Arquivo)</p>
-                    <Button asChild>
-                      <a
-                        href={getMediaUrl(aulaAtual.url)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        Baixar Arquivo
-                      </a>
+                    <Button onClick={() => baixarMaterial(aulaAtual)} disabled={baixandoId === aulaAtual.id}>
+                      <Download className="h-4 w-4 mr-2" />
+                      {baixandoId === aulaAtual.id ? "Baixando..." : "Baixar Arquivo"}
                     </Button>
                   </Card>
                 )}

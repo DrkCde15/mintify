@@ -2,6 +2,7 @@
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy.orm import Session, joinedload 
@@ -35,26 +36,23 @@ from utils.validators import (
 )
 
 from utils.notifications import notificar_venda, notificar_rastreio, criar_notificacao
-from utils.cakto_client import cakto_client
 
 # 1. Inicia as tabelas no Banco de Dados
 models.Base.metadata.create_all(bind=engine)
 
 
-def _ensure_produtos_checkout_columns() -> None:
-    """Garante colunas de integração Cakto na tabela de produtos."""
+def _ensure_compras_forma_pagamento_column() -> None:
+    """Garante a coluna forma_pagamento na tabela de compras."""
     inspector = inspect(engine)
     table_names = inspector.get_table_names()
-    if "produtos" not in table_names:
+    if "compras" not in table_names:
         return
 
-    existing_columns = {col["name"] for col in inspector.get_columns("produtos")}
+    existing_columns = {col["name"] for col in inspector.get_columns("compras")}
     statements = []
 
-    if "checkout_url" not in existing_columns:
-        statements.append("ALTER TABLE produtos ADD COLUMN checkout_url VARCHAR(255) NULL")
-    if "cakto_external_id" not in existing_columns:
-        statements.append("ALTER TABLE produtos ADD COLUMN cakto_external_id VARCHAR(100) NULL")
+    if "forma_pagamento" not in existing_columns:
+        statements.append("ALTER TABLE compras ADD COLUMN forma_pagamento VARCHAR(20) NULL")
 
     if not statements:
         return
@@ -63,10 +61,30 @@ def _ensure_produtos_checkout_columns() -> None:
         for stmt in statements:
             connection.execute(text(stmt))
 
-    print("✅ Colunas checkout_url/cakto_external_id verificadas na tabela produtos")
+    print("Coluna forma_pagamento verificada na tabela compras")
 
 
-_ensure_produtos_checkout_columns()
+_ensure_compras_forma_pagamento_column()
+
+
+def _ensure_midias_titulo_column() -> None:
+    """Garante a coluna titulo na tabela midias_produto."""
+    inspector = inspect(engine)
+    table_names = inspector.get_table_names()
+    if "midias_produto" not in table_names:
+        return
+
+    existing_columns = {col["name"] for col in inspector.get_columns("midias_produto")}
+    if "titulo" in existing_columns:
+        return
+
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE midias_produto ADD COLUMN titulo VARCHAR(150) NULL"))
+
+    print("Coluna titulo verificada na tabela midias_produto")
+
+
+_ensure_midias_titulo_column()
 
 # 2. ConfiguraÃ§Ã£o de Pastas de Upload
 UPLOAD_DIR = "uploads"
@@ -138,11 +156,35 @@ async def cadastrar_usuario(request: Request, user: schemas.UsuarioCreate, db: S
     db_user = db.query(models.Usuario).filter(models.Usuario.email == user.email).first()
     if db_user:
         raise HTTPException(status_code=400, detail="Este e-mail jÃ¡ estÃ¡ cadastrado.")
-    
+
+    perfil = (user.perfil or "aluno").strip().lower()
+    if perfil not in {"aluno", "vendedor"}:
+        raise HTTPException(status_code=400, detail="Perfil invalido. Use 'aluno' ou 'vendedor'.")
+
+    tipo_produto_interesse = user.tipo_produto_interesse.strip().lower() if user.tipo_produto_interesse else None
+    chave_pix = user.chave_pix.strip() if user.chave_pix else None
+
+    if perfil == "vendedor":
+        if not chave_pix:
+            raise HTTPException(status_code=400, detail="Para vendedor, informe uma chave PIX.")
+        validar_chave_pix(chave_pix)
+
+        if tipo_produto_interesse not in {"digital", "fisico"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Para vendedor, informe o tipo de produto que vai vender: 'digital' ou 'fisico'."
+            )
+    else:
+        tipo_produto_interesse = None
+        chave_pix = None
+
     novo_usuario = models.Usuario(
         nome=user.nome,
         email=user.email,
-        senha=security.gerar_senha_hash(user.senha)
+        senha=security.gerar_senha_hash(user.senha),
+        perfil=perfil,
+        tipo_produto_interesse=tipo_produto_interesse,
+        chave_pix=chave_pix
     )
     db.add(novo_usuario)
     db.commit()
@@ -200,77 +242,76 @@ async def completar_perfil(dados: schemas.UsuarioUpdate, db: Session = Depends(g
 
 # --- ROTAS DE PRODUTOS E MARKETPLACE ---
 
-def _resolve_checkout_url(produto: models.Produto) -> Optional[str]:
-    if produto.checkout_url:
-        return produto.checkout_url
-    if settings.CAKTO_FALLBACK_CHECKOUT_URL:
-        return settings.CAKTO_FALLBACK_CHECKOUT_URL
-    return None
+
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv"}
 
 
-def _gerar_checkout_automatico_cakto(
-    titulo: str,
-    descricao: str,
-    preco: float,
-    cakto_external_id: Optional[str],
-) -> tuple[Optional[str], Optional[str], Optional[str]]:
+def _normalizar_categoria_digital(tipo_produto: str) -> str:
+    """Mapeia o tipo informado para categorias digitais usadas na validacao."""
+    tipo_normalizado = (tipo_produto or "").strip().lower()
+
+    if "curso" in tipo_normalizado or "aula" in tipo_normalizado:
+        return "aulas"
+    if "ebook" in tipo_normalizado or "e-book" in tipo_normalizado or "e book" in tipo_normalizado:
+        return "ebook"
+    if "link" in tipo_normalizado:
+        return "link"
+    return "outro"
+
+
+def _validar_arquivos_por_categoria_digital(tipo_produto: str, arquivos: List[UploadFile]) -> None:
     """
-    Tenta gerar/recuperar checkout na Cakto.
-    Retorna: (checkout_url, cakto_external_id, warning)
+    Regras de negocio para produtos digitais:
+    - Aulas/curso: apenas videos.
+    - Ebook/link: nao pode ter aula em video.
     """
-    if not settings.CAKTO_AUTO_CREATE_CHECKOUT:
-        return None, cakto_external_id, None
+    categoria = _normalizar_categoria_digital(tipo_produto)
+    extensoes = [
+        os.path.splitext(arquivo.filename or "")[1].lower()
+        for arquivo in arquivos
+        if arquivo and arquivo.filename
+    ]
 
-    try:
-        produto_cakto = None
-        if cakto_external_id:
-            produto_cakto = cakto_client.obter_produto(cakto_external_id)
-        else:
-            produto_cakto = cakto_client.buscar_produto_por_nome(titulo)
-            if produto_cakto:
-                cakto_external_id = str(produto_cakto.get("id") or "").strip() or cakto_external_id
-
-        checkout_url = cakto_client.extrair_checkout_url(produto_cakto)
-        if checkout_url:
-            return checkout_url, cakto_external_id, None
-
-        if not produto_cakto:
-            return None, cakto_external_id, (
-                "produto nao encontrado na Cakto por external_id/nome. "
-                "Informe o cakto_external_id ou checkout_url manualmente."
+    if categoria == "aulas":
+        if not extensoes:
+            raise HTTPException(
+                status_code=400,
+                detail="Produtos do tipo aula/curso precisam de pelo menos um arquivo de video.",
             )
 
-        return None, cakto_external_id, (
-            "produto encontrado na Cakto, mas sem salesPage/checkoutUrl. "
-            "Configure a pagina de vendas no painel da Cakto."
-        )
-    except Exception as e:
-        return None, cakto_external_id, str(e)
+        extensoes_invalidas = [ext for ext in extensoes if ext not in VIDEO_EXTENSIONS]
+        if extensoes_invalidas:
+            raise HTTPException(
+                status_code=400,
+                detail="Produtos do tipo aula/curso aceitam apenas videos (.mp4, .mov, .avi, .mkv).",
+            )
+        return
+
+    if categoria in {"ebook", "link"}:
+        possui_video = any(ext in VIDEO_EXTENSIONS for ext in extensoes)
+        if possui_video:
+            raise HTTPException(
+                status_code=400,
+                detail="Produtos digitais do tipo ebook/link nao devem conter aulas em video.",
+            )
 
 
-def _garantir_checkout_produto(db: Session, produto: models.Produto) -> models.Produto:
-    """
-    Garante checkout_url para produtos antigos sem checkout salvo.
-    Tenta gerar automaticamente e persiste no banco quando der certo.
-    """
-    if produto.checkout_url:
-        return produto
+def _resolver_caminho_midia_arquivo(url_midia: str) -> str:
+    """Resolve caminho absoluto de arquivo de midia dentro da pasta uploads."""
+    if not url_midia:
+        raise HTTPException(status_code=404, detail="Arquivo nao encontrado.")
 
-    checkout_url_auto, cakto_external_id_auto, _warning = _gerar_checkout_automatico_cakto(
-        titulo=produto.titulo,
-        descricao=produto.descricao or "",
-        preco=produto.preco,
-        cakto_external_id=produto.cakto_external_id,
-    )
+    caminho_normalizado = os.path.normpath(url_midia.replace("/", os.sep).lstrip("\\/"))
+    uploads_abs = os.path.abspath(UPLOAD_DIR)
+    caminho_abs = os.path.abspath(os.path.join(os.getcwd(), caminho_normalizado))
 
-    if checkout_url_auto:
-        produto.checkout_url = checkout_url_auto
-        if cakto_external_id_auto:
-            produto.cakto_external_id = cakto_external_id_auto
-        db.commit()
-        db.refresh(produto)
+    if not caminho_abs.startswith(f"{uploads_abs}{os.sep}"):
+        raise HTTPException(status_code=400, detail="Caminho de arquivo invalido.")
 
-    return produto
+    if not os.path.isfile(caminho_abs):
+        raise HTTPException(status_code=404, detail="Arquivo nao encontrado.")
+
+    return caminho_abs
 
 @app.get("/api/produtos", response_model=schemas.PaginatedResponse[schemas.ProdutoResponse])
 def listar_produtos(
@@ -282,8 +323,6 @@ def listar_produtos(
     total = query.count()
     
     produtos = query.offset((params.page - 1) * params.per_page).limit(params.per_page).all()
-    for produto in produtos:
-        produto.checkout_url = _resolve_checkout_url(produto)
     total_pages = (total + params.per_page - 1) // params.per_page
     
     return {
@@ -303,8 +342,6 @@ async def upload_produto(
     descricao: str = Form(...),
     tipo_produto: str = Form("Curso Online"),
     tipo_entrega: str = Form("digital"), # 'digital' ou 'fisico'
-    checkout_url: Optional[str] = Form(None),
-    cakto_external_id: Optional[str] = Form(None),
     estoque: int = Form(0),
     peso_kg: Optional[float] = Form(None),
     largura_cm: Optional[float] = Form(None),
@@ -323,33 +360,12 @@ async def upload_produto(
     
     if not imagens:
         raise HTTPException(status_code=400, detail="Pelo menos uma imagem deve ser enviada.")
+
+    if tipo_entrega == "digital":
+        _validar_arquivos_por_categoria_digital(tipo_produto, arquivos)
     
     # Validar preÃ§o
     preco = validar_preco(preco)
-    checkout_informado_manualmente = bool(checkout_url and checkout_url.strip())
-    checkout_url = checkout_url.strip() if checkout_url else None
-    cakto_external_id = cakto_external_id.strip() if cakto_external_id else None
-    checkout_warning = None
-    checkout_gerado_automaticamente = False
-
-    if not checkout_url:
-        checkout_url_auto, cakto_external_id_auto, checkout_warning = _gerar_checkout_automatico_cakto(
-            titulo=titulo,
-            descricao=descricao,
-            preco=preco,
-            cakto_external_id=cakto_external_id,
-        )
-        if checkout_url_auto:
-            checkout_gerado_automaticamente = True
-        checkout_url = checkout_url_auto or checkout_url
-        cakto_external_id = cakto_external_id_auto or cakto_external_id
-
-    checkout_url = checkout_url or settings.CAKTO_FALLBACK_CHECKOUT_URL or None
-    if not checkout_url:
-        detalhe = "Informe o link de checkout da Cakto para este produto."
-        if checkout_warning:
-            detalhe = f"{detalhe} Falha na criacao automatica: {checkout_warning}"
-        raise HTTPException(status_code=400, detail=detalhe)
     
     # Validar imagens (mÃ¡ximo 10)
     if len(imagens) > 10:
@@ -372,8 +388,6 @@ async def upload_produto(
         descricao=descricao,
         tipo=tipo_produto,
         tipo_entrega=tipo_entrega,
-        checkout_url=checkout_url,
-        cakto_external_id=cakto_external_id,
         estoque=estoque,
         peso_kg=peso_kg,
         largura_cm=largura_cm,
@@ -469,9 +483,7 @@ async def upload_produto(
     
     return {
         "message": "Produto cadastrado com sucesso!",
-        "produto": schemas.ProdutoResponse.from_orm(novo_produto),
-        "checkout_gerado_automaticamente": bool(checkout_gerado_automaticamente and not checkout_informado_manualmente),
-        "checkout_warning": checkout_warning
+        "produto": schemas.ProdutoResponse.from_orm(novo_produto)
     }
 
 
@@ -520,7 +532,6 @@ def buscar_produtos(
         
         # Atualiza a lista de midias no dicionÃ¡rio do produto
         produto_dict['midias'] = midias_ordenadas
-        produto_dict['checkout_url'] = produto_dict.get('checkout_url') or settings.CAKTO_FALLBACK_CHECKOUT_URL or None
         
         produtos_para_resposta.append(schemas.ProdutoResponse.model_validate(produto_dict))
     
@@ -542,8 +553,6 @@ def get_produto(produto_id: int, db: Session = Depends(get_db)):
                 .first()
     if not produto:
         raise HTTPException(status_code=404, detail="Produto nÃ£o encontrado.")
-    produto = _garantir_checkout_produto(db, produto)
-    produto.checkout_url = _resolve_checkout_url(produto)
     return produto
 
 @app.post("/api/produtos/comprar/{produto_id}")
@@ -556,18 +565,14 @@ async def comprar_produto(
     email: str = Depends(get_current_user)
 ):
     """Realiza a compra de um produto (Digital ou FÃ­sico)"""
-    if not settings.ALLOW_INTERNAL_PURCHASE:
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "Compra direta desativada. Finalize o pagamento no checkout da Cakto "
-                "e aguarde a liberacao automatica via webhook."
-            ),
-        )
-
     prod = db.query(models.Produto).filter(models.Produto.id == produto_id).first()
     if not prod:
         raise HTTPException(status_code=404, detail="Produto nÃ£o encontrado")
+
+    forma_pagamento = (compra_data.forma_pagamento or "").strip().lower()
+    formas_validas = {"cartao", "dinheiro", "pix"}
+    if forma_pagamento not in formas_validas:
+        raise HTTPException(status_code=400, detail="Forma de pagamento invalida. Use cartao, dinheiro ou pix.")
 
     # Verifica se Ã© digital e se o aluno jÃ¡ possui
     if prod.tipo_entrega == "digital":
@@ -592,7 +597,8 @@ async def comprar_produto(
             aluno_email=email, 
             produto_id=produto_id, 
             valor_pago=prod.preco,
-            tipo_entrega_momento=prod.tipo_entrega
+            tipo_entrega_momento=prod.tipo_entrega,
+            forma_pagamento=forma_pagamento
         )
         
         # Se fÃ­sico, preencher endereÃ§o e status logÃ­stico
@@ -622,7 +628,11 @@ async def comprar_produto(
 
         db.commit()
 
-        return {"message": "Compra realizada com sucesso!", "tipo": prod.tipo_entrega}
+        return {
+            "message": "Compra realizada com sucesso!",
+            "tipo": prod.tipo_entrega,
+            "forma_pagamento": forma_pagamento
+        }
 
     except Exception as e:
         db.rollback()
@@ -956,178 +966,60 @@ async def get_materiais_curso(
                          .filter(models.ProgressoAula.aluno_email == email)\
                          .all()
     ids_concluidos = [a[0] for a in aulas_concluidas]
+    ids_concluidos_set = set(ids_concluidos)
+
+    midias_ordenadas = sorted(
+        [midia for midia in produto.midias if midia.tipo in {"video", "arquivo"}],
+        key=lambda m: m.ordem
+    )
+    aulas = [
+        {
+            "id": midia.id,
+            "titulo": midia.titulo or f"Material {idx + 1}",
+            "tipo": midia.tipo,
+            "url": midia.url,
+            "concluida": midia.id in ids_concluidos_set
+        }
+        for idx, midia in enumerate(midias_ordenadas)
+    ]
 
     return {
         "produto": produto,
+        "aulas": aulas,
         "aulas_concluidas": ids_concluidos
     }
 
-# --- WEBHOOK CAKTO ---
 
-@app.post("/api/cakto/setup-webhook")
-async def setup_webhook_cakto(
-    dados: dict,
+@app.get("/api/membros/download/{midia_id}")
+async def baixar_midia_membro(
+    midia_id: int,
+    db: Session = Depends(get_db),
     email: str = Depends(get_current_user)
 ):
-    """
-    Registra automaticamente o endpoint do Mintify como webhook na Cakto.
-    Envie: { "url_base": "https://sua-url-publica.com" }
-    """
-    url_base = dados.get("url_base", "").rstrip("/")
-    if not url_base:
-        raise HTTPException(status_code=400, detail="Informe a 'url_base' do seu servidor pÃºblico.")
+    """Download protegido de material digital para comprador autenticado."""
+    midia = db.query(models.MidiaProduto).filter(models.MidiaProduto.id == midia_id).first()
+    if not midia:
+        raise HTTPException(status_code=404, detail="Material nao encontrado.")
 
-    webhook_url = f"{url_base}/api/webhooks/cakto"
+    if midia.tipo not in {"arquivo", "video"}:
+        raise HTTPException(status_code=400, detail="Apenas arquivos digitais podem ser baixados.")
 
-    produtos = dados.get("products") or dados.get("produtos") or []
-    if not isinstance(produtos, list) or not produtos:
-        raise HTTPException(
-            status_code=400,
-            detail="Informe 'products' com a lista de IDs de produtos da Cakto para registrar o webhook."
-        )
+    compra = db.query(models.Compra).filter(
+        models.Compra.aluno_email == email,
+        models.Compra.produto_id == midia.produto_id
+    ).first()
+    if not compra:
+        raise HTTPException(status_code=403, detail="Voce nao tem permissao para baixar este material.")
 
-    eventos = dados.get("events") or ["purchase_approved", "refund"]
-    if not isinstance(eventos, list) or not eventos:
-        raise HTTPException(status_code=400, detail="Informe uma lista valida em 'events'.")
+    caminho_arquivo = _resolver_caminho_midia_arquivo(midia.url)
+    nome_download = os.path.basename(caminho_arquivo)
+    media_type = "application/octet-stream"
 
-    try:
-        resultado = cakto_client.criar_webhook(
-            url=webhook_url,
-            eventos=eventos,
-            products=produtos,
-            name=dados.get("name", "Mintify Webhook"),
-            status=dados.get("status", "active"),
-        )
-        return {
-            "message": "Webhook registrado na Cakto com sucesso!",
-            "webhook_url": webhook_url,
-            "cakto_response": resultado
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao registrar webhook na Cakto: {str(e)}")
-
-
-@app.get("/api/cakto/pedidos")
-async def listar_pedidos_cakto(
-    page: int = 1,
-    limit: int = 50,
-    email: str = Depends(get_current_user)
-):
-    """Lista os pedidos diretamente da API da Cakto (para consulta/diagnÃ³stico)"""
-    try:
-        return cakto_client.listar_pedidos(page=page, limit=limit)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao consultar Cakto: {str(e)}")
-
-
-@app.post("/api/webhooks/cakto")
-async def webhook_cakto(request: Request, db: Session = Depends(get_db)):
-    """
-    Recebe notificaÃ§Ãµes de pagamento da Cakto e libera o acesso ao produto.
-    """
-    try:
-        payload = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Payload invÃ¡lido")
-    
-    # Log para monitoramento
-    print(f"ðŸ”” [Cakto Webhook] Evento recebido: {payload.get('event') or payload.get('status')}")
-
-    # Identificar o status da compra
-    # A Cakto geralmente envia 'event': 'order.approved' ou status no corpo principal
-    status_compra = payload.get("event") or payload.get("status")
-    data = payload.get("data") or payload
-    
-    # Status que indicam sucesso no pagamento
-    status_sucesso = [
-        "purchase_approved",
-        "order.approved",
-        "paid",
-        "approved",
-        "completed",
-    ]
-
-    if status_compra in status_sucesso:
-        # Extrair e-mail do aluno e ID do produto
-        # O 'external_id' deve ser configurado no link de checkout da Cakto como o ID do produto no Mintify
-        aluno_email = data.get("customer", {}).get("email") or data.get("email")
-        
-        # Tentamos buscar o ID do produto em diferentes locais comuns de payloads
-        produto_id_externo = (
-            data.get("product", {}).get("external_id") or 
-            data.get("external_id") or 
-            data.get("metadata", {}).get("produto_id")
-        )
-
-        if not aluno_email or not produto_id_externo:
-            print(f"âš ï¸ Dados insuficientes: Email={aluno_email}, ProdutoID={produto_id_externo}")
-            return {"status": "error", "message": "Dados do comprador ou produto nÃ£o encontrados"}
-
-        produto_external_id = str(produto_id_externo).strip()
-        produto = None
-        prod_id = None
-
-        # Primeiro tenta por ID numÃ©rico do produto (external_id = ID interno)
-        try:
-            prod_id = int(produto_external_id)
-            produto = db.query(models.Produto).filter(models.Produto.id == prod_id).first()
-        except (TypeError, ValueError):
-            pass
-
-        # Fallback: external_id textual configurado no campo cakto_external_id
-        if not produto:
-            produto = db.query(models.Produto).filter(
-                models.Produto.cakto_external_id == produto_external_id
-            ).first()
-
-        if not produto:
-            print(f"âŒ Produto nÃ£o encontrado (external_id={produto_external_id}, id_parseado={prod_id})")
-            return {"status": "error", "message": "Produto nÃ£o cadastrado no sistema"}
-
-        # Verificar se a compra jÃ¡ foi registrada para evitar duplicidade
-        compra_existente = db.query(models.Compra).filter(
-            models.Compra.aluno_email == aluno_email,
-            models.Compra.produto_id == produto.id
-        ).first()
-
-        if not compra_existente:
-            # CRIAR A COMPRA (LIBERAR ACESSO)
-            nova_compra = models.Compra(
-                aluno_email=aluno_email,
-                produto_id=produto.id,
-                valor_pago=data.get("amount", produto.preco),
-                tipo_entrega_momento=produto.tipo_entrega
-            )
-            db.add(nova_compra)
-            
-            # Registrar a movimentaÃ§Ã£o financeira para o vendedor
-            db.add(models.Movimentacao(
-                vendedor_email=produto.vendedor_email, 
-                valor=data.get("amount", produto.preco), 
-                tipo='venda'
-            ))
-            
-            # Incrementar contador de vendas
-            produto.vendas_count += 1
-            
-            # Notificar vendedor e aluno
-            notificar_venda(db, produto.vendedor_email, produto.titulo, produto.preco)
-            criar_notificacao(
-                db, 
-                aluno_email, 
-                "Acesso Liberado!", 
-                f"Seu acesso ao produto '{produto.titulo}' jÃ¡ estÃ¡ disponÃ­vel na sua Ã¡rea de membros.",
-                "venda"
-            )
-            
-            db.commit()
-            print(f"âœ… SUCESSO: Produto '{produto.titulo}' liberado para {aluno_email}")
-            return {"status": "success", "message": "Produto liberado com sucesso"}
-        else:
-            print(f"â„¹ï¸ Compra jÃ¡ processada anteriormente para {aluno_email}")
-            return {"status": "ignored", "message": "Compra jÃ¡ existe"}
-
-
+    return FileResponse(
+        path=caminho_arquivo,
+        filename=nome_download,
+        media_type=media_type
+    )
 
 @app.post("/api/membros/concluir-aula/{midia_id}")
 async def concluir_aula(

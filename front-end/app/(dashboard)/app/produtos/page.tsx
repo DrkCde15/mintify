@@ -56,8 +56,6 @@ export default function ProdutosPage() {
     titulo: "",
     preco: "",
     descricao: "",
-    checkout_url: "",
-    cakto_external_id: "",
   })
   const [tipoProduto, setTipoProduto] = useState("Curso Online")
   const [tipoEntrega, setTipoEntrega] = useState<"digital" | "fisico">("digital")
@@ -116,8 +114,6 @@ export default function ProdutosPage() {
     formData.append("descricao", form.descricao)
     formData.append("tipo_produto", tipoProduto)
     formData.append("tipo_entrega", tipoEntrega)
-    if (form.checkout_url.trim()) formData.append("checkout_url", form.checkout_url.trim())
-    if (form.cakto_external_id.trim()) formData.append("cakto_external_id", form.cakto_external_id.trim())
 
     if (tipoEntrega === "fisico") {
       formData.append("estoque", String(estoque))
@@ -135,9 +131,6 @@ export default function ProdutosPage() {
         headers: { "Content-Type": "multipart/form-data" },
       })
       toast.success("Produto cadastrado com sucesso!")
-      if (response.data?.checkout_warning) {
-        toast.warning(`Produto salvo, mas o checkout automático falhou: ${response.data.checkout_warning}`)
-      }
       resetForm()
       setModalOpen(false)
       fetchProdutos()
@@ -153,8 +146,6 @@ export default function ProdutosPage() {
       titulo: "",
       preco: "",
       descricao: "",
-      checkout_url: "",
-      cakto_external_id: "",
     })
     setTipoProduto("Curso Online")
     setTipoEntrega("digital")
@@ -236,28 +227,6 @@ export default function ProdutosPage() {
                   onChange={(e) => setForm({ ...form, descricao: e.target.value })}
                   required
                 />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="checkout_url">Link de Checkout (Cakto - opcional)</Label>
-                  <Input
-                    id="checkout_url"
-                    type="url"
-                    placeholder="Deixe vazio para tentar criar automaticamente"
-                    value={form.checkout_url}
-                    onChange={(e) => setForm({ ...form, checkout_url: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="cakto_external_id">External ID (opcional)</Label>
-                  <Input
-                    id="cakto_external_id"
-                    placeholder="produto-mintify-001"
-                    value={form.cakto_external_id}
-                    onChange={(e) => setForm({ ...form, cakto_external_id: e.target.value })}
-                  />
-                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">

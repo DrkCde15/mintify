@@ -19,6 +19,9 @@ class UsuarioCreate(BaseModel):
     nome: str
     email: EmailStr
     senha: str
+    perfil: Optional[str] = "aluno"
+    tipo_produto_interesse: Optional[str] = None
+    chave_pix: Optional[str] = None
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -56,8 +59,6 @@ class ProdutoResponse(BaseModel):
     midias: List[MidiaProdutoResponse] = []
     status: str
     vendas_count: int
-    checkout_url: Optional[str] = None
-    cakto_external_id: Optional[str] = None
     arquivo_url: Optional[str] = None # Adicionado para retornar a URL do arquivo principal
     
     # Novos campos para produtos físicos
@@ -81,6 +82,7 @@ class EnderecoEntrega(BaseModel):
 
 class CompraRequest(BaseModel):
     endereco: Optional[EnderecoEntrega] = None
+    forma_pagamento: str
 
 class CompraResponse(BaseModel):
     id: int
@@ -88,6 +90,7 @@ class CompraResponse(BaseModel):
     produto_id: int
     valor_pago: float
     tipo_entrega_momento: str
+    forma_pagamento: Optional[str] = None
     status_logistica: Optional[str] = None
     codigo_rastreio: Optional[str] = None
     data_compra: datetime

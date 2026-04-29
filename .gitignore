@@ -1,4 +1,3 @@
-tests/
-.pytest_cache/
 pytest.ini
 uploads/
+__pycache__/

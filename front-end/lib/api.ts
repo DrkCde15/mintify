@@ -67,8 +67,6 @@ export interface Produto {
   preco: number
   tipo: string
   tipo_entrega: "digital" | "fisico"
-  checkout_url?: string | null
-  cakto_external_id?: string | null
   estoque?: number
   midias: Midia[]
   vendedor_email?: string
@@ -85,6 +83,7 @@ export interface Compra {
   data_compra: string
   valor_pago: number
   tipo_entrega_momento: "digital" | "fisico"
+  forma_pagamento?: "cartao" | "dinheiro" | "pix"
   status_logistica?: string
   codigo_rastreio?: string
   aluno_email?: string
