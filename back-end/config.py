@@ -12,6 +12,14 @@ class Settings(BaseSettings):
     # Banco de Dados
     DATABASE_URL: str
     
+    # Pagamentos
+    MERCADOPAGO_ACCESS_TOKEN: str = ""
+    PAYPAL_MODE: str = "sandbox"  # 'sandbox' ou 'live'
+    PAYPAL_LIVE_CLIENT_ID: str = ""
+    PAYPAL_LIVE_SECRET_KEY: str = ""
+    PAYPAL_SANDBOX_CLIENT_ID: str = ""
+    PAYPAL_SANDBOX_SECRET_KEY: str = ""
+    
     # Segurança JWT
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
@@ -33,7 +41,8 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     
     # CORS
-    CORS_ORIGINS: str = "http://localhost:5173"
+    CORS_ORIGINS: str = "http://localhost:3000"
+    FRONTEND_URL: str = "http://localhost:3000"
     
     # Upload
     MAX_IMAGE_SIZE_MB: int = 5
@@ -48,6 +57,27 @@ class Settings(BaseSettings):
         """Converte string de origens CORS em lista"""
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
     
+    @property
+    def paypal_base_url(self) -> str:
+        """Retorna a URL base do PayPal dependendo do modo"""
+        if self.PAYPAL_MODE.lower() == "live":
+            return "https://api-m.paypal.com"
+        return "https://api-m.sandbox.paypal.com"
+
+    @property
+    def paypal_client_id(self) -> str:
+        """Retorna o Client ID correto dependendo do modo"""
+        if self.PAYPAL_MODE.lower() == "live":
+            return self.PAYPAL_LIVE_CLIENT_ID
+        return self.PAYPAL_SANDBOX_CLIENT_ID
+
+    @property
+    def paypal_secret_key(self) -> str:
+        """Retorna a Secret Key correta dependendo do modo"""
+        if self.PAYPAL_MODE.lower() == "live":
+            return self.PAYPAL_LIVE_SECRET_KEY
+        return self.PAYPAL_SANDBOX_SECRET_KEY
+
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
 
 

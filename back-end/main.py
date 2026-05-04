@@ -1,4 +1,4 @@
-﻿from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.staticfiles import StaticFiles
@@ -15,8 +15,7 @@ import shutil
 import os
 import uuid
 from sqlalchemy import or_, inspect, text
-
-# ImportaÃ§Ãµes locais do seu projeto
+import mercadopago
 import models, schemas, security
 from database import engine, get_db
 from config import settings
@@ -36,6 +35,7 @@ from utils.validators import (
 )
 
 from utils.notifications import notificar_venda, notificar_rastreio, criar_notificacao
+from utils.paypal import paypal_client
 
 # 1. Inicia as tabelas no Banco de Dados
 models.Base.metadata.create_all(bind=engine)
@@ -53,6 +53,16 @@ def _ensure_compras_forma_pagamento_column() -> None:
 
     if "forma_pagamento" not in existing_columns:
         statements.append("ALTER TABLE compras ADD COLUMN forma_pagamento VARCHAR(20) NULL")
+    if "status_pagamento" not in existing_columns:
+        statements.append("ALTER TABLE compras ADD COLUMN status_pagamento VARCHAR(30) DEFAULT 'pendente'")
+    if "pagamento_id" not in existing_columns:
+        statements.append("ALTER TABLE compras ADD COLUMN pagamento_id VARCHAR(100) NULL")
+    if "checkout_url" not in existing_columns:
+        statements.append("ALTER TABLE compras ADD COLUMN checkout_url VARCHAR(500) NULL")
+    if "qr_code_pix" not in existing_columns:
+        statements.append("ALTER TABLE compras ADD COLUMN qr_code_pix VARCHAR(1000) NULL")
+    if "qr_code_base64_pix" not in existing_columns:
+        statements.append("ALTER TABLE compras ADD COLUMN qr_code_base64_pix TEXT NULL")
 
     if not statements:
         return
@@ -61,7 +71,7 @@ def _ensure_compras_forma_pagamento_column() -> None:
         for stmt in statements:
             connection.execute(text(stmt))
 
-    print("Coluna forma_pagamento verificada na tabela compras")
+    print("Colunas da tabela compras verificadas e atualizadas")
 
 
 _ensure_compras_forma_pagamento_column()
@@ -570,9 +580,9 @@ async def comprar_produto(
         raise HTTPException(status_code=404, detail="Produto nÃ£o encontrado")
 
     forma_pagamento = (compra_data.forma_pagamento or "").strip().lower()
-    formas_validas = {"cartao", "dinheiro", "pix"}
+    formas_validas = {"cartao", "dinheiro", "pix", "paypal"}
     if forma_pagamento not in formas_validas:
-        raise HTTPException(status_code=400, detail="Forma de pagamento invalida. Use cartao, dinheiro ou pix.")
+        raise HTTPException(status_code=400, detail="Forma de pagamento invalida. Use cartao, dinheiro, pix ou paypal.")
 
     # Verifica se Ã© digital e se o aluno jÃ¡ possui
     if prod.tipo_entrega == "digital":
@@ -598,10 +608,11 @@ async def comprar_produto(
             produto_id=produto_id, 
             valor_pago=prod.preco,
             tipo_entrega_momento=prod.tipo_entrega,
-            forma_pagamento=forma_pagamento
+            forma_pagamento=forma_pagamento,
+            status_pagamento="pendente"
         )
         
-        # Se fÃ­sico, preencher endereÃ§o e status logÃ­stico
+        # Se físico, preencher endereço e status logístico
         if prod.tipo_entrega == "fisico":
             nova_compra.status_logistica = "pendente_envio"
             nova_compra.cep = compra_data.endereco.cep
@@ -616,27 +627,187 @@ async def comprar_produto(
             prod.estoque -= 1
 
         db.add(nova_compra)
-        
-        # 2. Gera crÃ©dito financeiro para o Vendedor
-        db.add(models.Movimentacao(vendedor_email=prod.vendedor_email, valor=prod.preco, tipo='venda'))
-        
-        # 3. Atualiza contador de vendas
-        prod.vendas_count += 1
-        
-        # 4. NOTIFICAÃ‡Ã•ES (In-App e Email)
-        notificar_venda(db, prod.vendedor_email, prod.titulo, prod.preco)
+        db.flush() # Salva no banco para gerar o ID da compra
+
+        # Integrando com Mercado Pago
+        sdk = mercadopago.SDK(settings.MERCADOPAGO_ACCESS_TOKEN)
+
+        base_url = str(request.base_url)
+        if "localhost" in base_url or "127.0.0.1" in base_url:
+            webhook_url = "https://api.mintify.com.br/api/webhooks/mercadopago" # Dummy URL para testes locais
+        else:
+            webhook_url = f"{base_url}api/webhooks/mercadopago"
+            
+        # O Sandbox do Mercado Pago recusa a transação se o email do comprador for igual ao do vendedor
+        # Vamos usar um email genérico apenas pro MP para evitar o erro 403 no Sandbox
+        mp_buyer_email = f"comprador_{uuid.uuid4().hex[:8]}@sandbox.mintify.com"
+
+        if forma_pagamento == "cartao":
+            preference_data = {
+                "items": [
+                    {
+                        "title": prod.titulo,
+                        "quantity": 1,
+                        "currency_id": "BRL",
+                        "unit_price": float(prod.preco)
+                    }
+                ],
+                "payer": {
+                    "email": mp_buyer_email
+                },
+                "external_reference": str(nova_compra.id),
+                "notification_url": webhook_url
+            }
+            preference_response = sdk.preference().create(preference_data)
+            
+            if preference_response.get("status") not in [200, 201]:
+                raise Exception(f"Erro Mercado Pago (Cartão): {preference_response}")
+                
+            nova_compra.checkout_url = preference_response["response"]["init_point"]
+            nova_compra.pagamento_id = preference_response["response"]["id"]
+
+        elif forma_pagamento == "pix":
+            payment_data = {
+                "transaction_amount": round(float(prod.preco), 2),
+                "description": prod.titulo,
+                "payment_method_id": "pix",
+                "payer": {
+                    "email": mp_buyer_email,
+                    "first_name": "Usuario",
+                    "last_name": "Teste",
+                    "identification": {
+                        "type": "CPF",
+                        "number": "19119119100"
+                    }
+                },
+                "external_reference": str(nova_compra.id),
+                "notification_url": webhook_url
+            }
+            
+            request_options = mercadopago.config.RequestOptions()
+            request_options.custom_headers = {
+                'x-idempotency-key': str(uuid.uuid4())
+            }
+            
+            payment_response = sdk.payment().create(payment_data, request_options)
+            
+            if payment_response.get("status") not in [200, 201]:
+                raise Exception(f"Erro Mercado Pago (Pix): {payment_response}")
+            
+            nova_compra.pagamento_id = str(payment_response["response"]["id"])
+            nova_compra.qr_code_pix = payment_response["response"]["point_of_interaction"]["transaction_data"]["qr_code"]
+            nova_compra.qr_code_base64_pix = payment_response["response"]["point_of_interaction"]["transaction_data"]["qr_code_base64"]
+
+        elif forma_pagamento == "dinheiro":
+            # Para dinheiro, vamos assumir que já é aprovado de imediato (apenas para teste/mvp)
+            nova_compra.status_pagamento = "aprovado"
+            db.add(models.Movimentacao(vendedor_email=prod.vendedor_email, valor=prod.preco, tipo='venda'))
+            prod.vendas_count += 1
+            notificar_venda(db, prod.vendedor_email, prod.titulo, prod.preco)
+
+        elif forma_pagamento == "paypal":
+            # Criar pedido no PayPal
+            paypal_order = await paypal_client.create_order(
+                amount=prod.preco,
+                return_url=f"{settings.FRONTEND_URL}/checkout/sucesso",
+                cancel_url=f"{settings.FRONTEND_URL}/checkout/cancelado",
+                reference_id=str(nova_compra.id)
+            )
+            
+            nova_compra.pagamento_id = paypal_order["id"]
+            # O link de aprovação está na lista de links
+            approve_url = next(link["href"] for link in paypal_order["links"] if link["rel"] == "approve")
+            nova_compra.checkout_url = approve_url
 
         db.commit()
+        db.refresh(nova_compra)
 
         return {
-            "message": "Compra realizada com sucesso!",
+            "message": "Pagamento iniciado com sucesso!",
             "tipo": prod.tipo_entrega,
-            "forma_pagamento": forma_pagamento
+            "forma_pagamento": forma_pagamento,
+            "checkout_url": nova_compra.checkout_url,
+            "qr_code_pix": nova_compra.qr_code_pix,
+            "qr_code_base64_pix": nova_compra.qr_code_base64_pix
         }
 
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Erro no processamento: {str(e)}")
+
+@app.post("/api/webhooks/mercadopago")
+async def webhook_mercadopago(request: Request, db: Session = Depends(get_db)):
+    """Recebe as notificações de pagamento do Mercado Pago"""
+    topic = request.query_params.get("topic") or request.query_params.get("type")
+    
+    if topic == "payment":
+        payment_id = request.query_params.get("id") or request.query_params.get("data.id")
+        if not payment_id:
+            try:
+                data = await request.json()
+                payment_id = data.get("data", {}).get("id")
+            except:
+                pass
+                
+        if payment_id:
+            sdk = mercadopago.SDK(settings.MERCADOPAGO_ACCESS_TOKEN)
+            payment_info = sdk.payment().get(payment_id)
+            
+            if payment_info["status"] == 200:
+                payment_data = payment_info["response"]
+                compra_id = payment_data.get("external_reference")
+                status = payment_data.get("status")
+                
+                if compra_id and status == "approved":
+                    compra = db.query(models.Compra).filter(models.Compra.id == int(compra_id)).first()
+                    if compra and compra.status_pagamento != "aprovado":
+                        compra.status_pagamento = "aprovado"
+                        
+                        # Creditar o vendedor
+                        prod = compra.produto
+                        db.add(models.Movimentacao(vendedor_email=prod.vendedor_email, valor=prod.preco, tipo='venda'))
+                        prod.vendas_count += 1
+                        
+                        # Notificar
+                        notificar_venda(db, prod.vendedor_email, prod.titulo, prod.preco)
+                        
+                        db.commit()
+    
+    return {"status": "success"}
+    
+@app.post("/api/paypal/capture-order/{order_id}")
+async def capture_paypal_order(order_id: str, db: Session = Depends(get_db)):
+    """Captura o pagamento do PayPal e aprova a compra no sistema"""
+    try:
+        capture_data = await paypal_client.capture_payment(order_id)
+        
+        if capture_data.get("status") == "COMPLETED":
+            # Buscar a compra pelo pagamento_id
+            compra = db.query(models.Compra).filter(models.Compra.pagamento_id == order_id).first()
+            
+            if not compra:
+                 raise HTTPException(status_code=404, detail="Compra não encontrada")
+            
+            if compra.status_pagamento != "aprovado":
+                compra.status_pagamento = "aprovado"
+                
+                # Creditar o vendedor
+                prod = compra.produto
+                db.add(models.Movimentacao(vendedor_email=prod.vendedor_email, valor=prod.preco, tipo='venda'))
+                prod.vendas_count += 1
+                
+                # Notificar
+                notificar_venda(db, prod.vendedor_email, prod.titulo, prod.preco)
+                
+                db.commit()
+                return {"status": "success", "message": "Pagamento capturado com sucesso!"}
+            
+            return {"status": "success", "message": "Pagamento já estava aprovado."}
+        else:
+            return {"status": "error", "message": f"Status do PayPal: {capture_data.get('status')}"}
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao capturar PayPal: {str(e)}")
 
 @app.get("/api/meus-cursos", response_model=schemas.PaginatedResponse[schemas.CompraComProduto])
 def listar_meus_cursos(

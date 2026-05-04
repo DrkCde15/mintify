@@ -50,8 +50,9 @@ export default function ProdutoDetalhePage({ params }: PageProps) {
   const [totalReviewPages, setTotalReviewPages] = useState(1)
   const [totalReviews, setTotalReviews] = useState(0)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
-  const [formaPagamento, setFormaPagamento] = useState<"cartao" | "dinheiro" | "pix" | "">("")
+  const [formaPagamento, setFormaPagamento] = useState<"cartao" | "dinheiro" | "pix" | "paypal" | "">("")
   const [buying, setBuying] = useState(false)
+  const [pixData, setPixData] = useState<{qr_code: string, copia_cola: string} | null>(null)
 
   const [endereco, setEndereco] = useState({
     cep: "",
@@ -149,13 +150,27 @@ export default function ProdutoDetalhePage({ params }: PageProps) {
         forma_pagamento: formaPagamento,
         endereco: product?.tipo_entrega === "fisico" ? endereco : null,
       }
-      await api.post(`/api/produtos/comprar/${id}`, body)
+      const res = await api.post(`/api/produtos/comprar/${id}`, body)
+      
+      if ((formaPagamento === "cartao" || formaPagamento === "paypal") && res.data.checkout_url) {
+        window.location.href = res.data.checkout_url
+        return
+      }
+      
+      if (formaPagamento === "pix" && res.data.qr_code_base64_pix) {
+        setPixData({
+            qr_code: res.data.qr_code_base64_pix,
+            copia_cola: res.data.qr_code_pix
+        })
+        setBuying(false)
+        return
+      }
+
       toast.success("Compra realizada com sucesso!")
       setPaymentModalOpen(false)
       router.push("/app/meus-cursos")
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Erro ao comprar o produto")
-    } finally {
       setBuying(false)
     }
   }
@@ -326,40 +341,69 @@ export default function ProdutoDetalhePage({ params }: PageProps) {
               </Card>
             )}
 
-            <Dialog open={paymentModalOpen} onOpenChange={setPaymentModalOpen}>
+            <Dialog open={paymentModalOpen} onOpenChange={(open) => {
+                if(!open) setPixData(null)
+                setPaymentModalOpen(open)
+            }}>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Escolha a forma de pagamento</DialogTitle>
+                  <DialogTitle>{pixData ? "Pagamento via PIX" : "Escolha a forma de pagamento"}</DialogTitle>
                   <DialogDescription>
-                    Selecione como deseja pagar para concluir a compra.
+                    {pixData ? "Escaneie o QR Code abaixo ou copie o código para pagar." : "Selecione como deseja pagar para concluir a compra."}
                   </DialogDescription>
                 </DialogHeader>
 
-                <div className="space-y-2">
-                  <Label>Forma de pagamento</Label>
-                  <Select
-                    value={formaPagamento}
-                    onValueChange={(value) => setFormaPagamento(value as "cartao" | "dinheiro" | "pix")}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione uma opção" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="cartao">Cartão</SelectItem>
-                      <SelectItem value="dinheiro">Dinheiro</SelectItem>
-                      <SelectItem value="pix">Pix</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                {pixData ? (
+                  <div className="flex flex-col items-center justify-center space-y-4 py-4">
+                    <img src={`data:image/jpeg;base64,${pixData.qr_code}`} alt="QR Code PIX" className="w-48 h-48 rounded-lg border p-2" />
+                    <div className="w-full">
+                      <Label>PIX Copia e Cola</Label>
+                      <div className="flex gap-2 mt-1">
+                        <Input readOnly value={pixData.copia_cola} />
+                        <Button onClick={() => {
+                            navigator.clipboard.writeText(pixData.copia_cola)
+                            toast.success("Código copiado!")
+                        }}>Copiar</Button>
+                      </div>
+                    </div>
+                    <Button className="w-full mt-4" variant="outline" onClick={() => {
+                        setPaymentModalOpen(false)
+                        setPixData(null)
+                        router.push("/app/meus-cursos")
+                    }}>
+                        Já paguei (Ver meus cursos)
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Forma de pagamento</Label>
+                      <Select
+                        value={formaPagamento}
+                        onValueChange={(value) => setFormaPagamento(value as "cartao" | "dinheiro" | "pix")}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione uma opção" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="cartao">Cartão de Crédito/Débito</SelectItem>
+                          <SelectItem value="dinheiro">Dinheiro</SelectItem>
+                          <SelectItem value="pix">Pix (Aprovação na hora)</SelectItem>
+                          <SelectItem value="paypal">PayPal</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
 
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setPaymentModalOpen(false)} disabled={buying}>
-                    Cancelar
-                  </Button>
-                  <Button onClick={handleBuyProduct} disabled={buying || !formaPagamento}>
-                    {buying ? "Processando..." : "Confirmar compra"}
-                  </Button>
-                </DialogFooter>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setPaymentModalOpen(false)} disabled={buying}>
+                        Cancelar
+                      </Button>
+                      <Button onClick={handleBuyProduct} disabled={buying || !formaPagamento}>
+                        {buying ? "Processando..." : "Confirmar compra"}
+                      </Button>
+                    </DialogFooter>
+                  </>
+                )}
               </DialogContent>
             </Dialog>
           </div>

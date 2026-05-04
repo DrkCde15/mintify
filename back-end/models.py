@@ -71,6 +71,11 @@ class Compra(Base):
     bairro = Column(String(100), nullable=True)
     cidade = Column(String(100), nullable=True)
     estado = Column(String(2), nullable=True)
+    status_pagamento = Column(String(30), default="pendente")
+    pagamento_id = Column(String(100), nullable=True)
+    checkout_url = Column(String(500), nullable=True)
+    qr_code_pix = Column(String(1000), nullable=True)
+    qr_code_base64_pix = Column(String(5000), nullable=True)
     
     data_compra = Column(DateTime(timezone=True), server_default=func.now())
     

@@ -101,6 +101,13 @@ class CompraResponse(BaseModel):
     numero: Optional[str] = None
     cidade: Optional[str] = None
     estado: Optional[str] = None
+    
+    # Mercado Pago
+    status_pagamento: Optional[str] = "pendente"
+    pagamento_id: Optional[str] = None
+    checkout_url: Optional[str] = None
+    qr_code_pix: Optional[str] = None
+    qr_code_base64_pix: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
